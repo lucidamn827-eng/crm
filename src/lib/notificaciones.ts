@@ -37,7 +37,7 @@ export async function avisarAsignacion(leadId: number) {
   const c = await config();
   const cuerpo =
     `Nuevo contacto para llamar: ${lead.nombre} (${lead.telefono})` +
-    `${lead.ciudad ? ` - ${lead.ciudad}` : ""}. Lo cargó ${lead.cargadoPor.nombre}. Entrá al panel para tomarlo.`;
+    ` DNI ${lead.dni}. Lo cargó ${lead.cargadoPor.nombre}. Entrá al panel para tomarlo.`;
 
   await enviarAviso({
     destinatario: lead.asignadoA,
