@@ -14,6 +14,7 @@ enum Rol {
   CARGADOR
   CALLER
 }
+
 enum EstadoLead {
   PENDIENTE
   NO_CONTESTO
@@ -21,7 +22,6 @@ enum EstadoLead {
   ACEPTO
   NO_QUISO
 }
-
 model Usuario {
   id             String    @id @default(cuid())
   usuario        String    @unique
