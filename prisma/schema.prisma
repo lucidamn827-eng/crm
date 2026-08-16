@@ -14,7 +14,6 @@ enum Rol {
   CARGADOR
   CALLER
 }
-
 enum EstadoLead {
   PENDIENTE
   NO_CONTESTO
@@ -22,6 +21,7 @@ enum EstadoLead {
   ACEPTO
   NO_QUISO
 }
+
 model Usuario {
   id             String    @id @default(cuid())
   usuario        String    @unique
@@ -45,6 +45,7 @@ model Usuario {
 model Lead {
   id            Int        @id @default(autoincrement())
   nombre        String
+  dni           String     @unique
   telefono      String     @unique
   ciudad        String?
   nota          String?

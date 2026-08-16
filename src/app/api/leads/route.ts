@@ -42,15 +42,19 @@ export async function POST(req: Request) {
     const creados: number[] = [], rechazados: string[] = [];
     for (const f of filas) {
       const nombre = String(f.nombre ?? "").trim();
+      const dni = String(f.dni ?? "").trim();
       const telefono = String(f.telefono ?? "").trim();
-      if (!nombre || digitos(telefono).length < 6) { rechazados.push(`${nombre || "(sin nombre)"}: datos incompletos`); continue; }
-      if (await db.lead.findUnique({ where: { telefono } })) { rechazados.push(`${nombre}: teléfono ya cargado`); continue; }
+      if (!nombre) { rechazados.push("(sin nombre): falta el nombre"); continue; }
+      if (digitos(dni).length < 6) { rechazados.push(`${nombre}: DNI inválido o vacío`); continue; }
+      if (digitos(telefono).length < 6) { rechazados.push(`${nombre}: teléfono inválido o vacío`); continue; }
+      if (await db.lead.findUnique({ where: { dni } })) { rechazados.push(`${nombre}: ese DNI ya está cargado`); continue; }
+      if (await db.lead.findUnique({ where: { telefono } })) { rechazados.push(`${nombre}: ese teléfono ya está cargado`); continue; }
       const destino = f.asignadoA && callers.some((c) => c.id === f.asignadoA)
         ? cargas.find((c) => c.id === f.asignadoA)!
         : menosCargado();
       const lead = await db.lead.create({
         data: {
-          nombre, telefono, ciudad: f.ciudad || null, nota: f.nota || null,
+          nombre, dni, telefono, ciudad: f.ciudad || null, nota: f.nota || null,
           cargadoPorId: s.id, asignadoAId: destino.id,
         },
       });

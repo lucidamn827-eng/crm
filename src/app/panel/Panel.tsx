@@ -5,7 +5,7 @@ import Avisador from "./Avisador";
 
 type Sesion = { id: string; usuario: string; nombre: string; rol: "ADMIN" | "CARGADOR" | "CALLER" };
 type Lead = {
-  id: number; nombre: string; telefono: string; ciudad?: string | null; nota?: string | null;
+  id: number; nombre: string; dni: string; telefono: string; ciudad?: string | null; nota?: string | null;
   estado: string; intentos: number; asignadoA: { nombre: string }; cargadoPor: { nombre: string };
   llamadas: { nota?: string | null; creadoEn: string }[];
 };
@@ -22,9 +22,14 @@ const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${St
 
 export default function Panel({ sesion }: { sesion: Sesion }) {
   const pestanas =
-    sesion.rol === "CALLER" ? [["cola", "Mi cola"]] :
+    sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"]] :
     sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"]] :
     [["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"]];
+
+  const marca =
+    sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#0F4C5C" } :
+    sesion.rol === "CARGADOR" ? { titulo: "Mesa de carga", color: "#5B3A8C" } :
+    { titulo: "Supervisión", color: "#123B2C" };
   const [vista, setVista] = useState(pestanas[0][0]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
@@ -44,10 +49,10 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 
   return (
     <>
-      <header className="tope">
+      <header className="tope" style={{ background: marca.color }}>
         <div className="tope-in">
           <span style={{ display: "flex", gap: 9, alignItems: "center", fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>
-            <span className="jack" /> Central
+            <span className="jack" /> Central · {marca.titulo}
           </span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}>
             {sesion.nombre} <span className="chapa">{sesion.rol}</span>
@@ -63,6 +68,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
       <main>
         <Avisador />
         {vista === "cola" && <Cola leads={leads} recargar={cargar} />}
+        {vista === "historial" && <MiHistorial leads={leads} sesion={sesion} />}
         {vista === "cargar" && <Cargar usuarios={usuarios} recargar={cargar} />}
         {(vista === "mias" || vista === "todos") && <Tabla leads={leads} />}
         {vista === "usuarios" && <Usuarios usuarios={usuarios} recargar={cargar} />}
@@ -105,7 +111,7 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
         </div>
         <span className="rotulo">Tocá el número para llamar</span>
         <a className="numero" href={`tel:${lead.telefono.replace(/\D/g, "")}`}>{lead.telefono}</a>
-        <p className="sub">{lead.ciudad ?? "Sin ciudad"} · {lead.intentos} intento(s) · cargado por {lead.cargadoPor.nombre}</p>
+        <p className="sub">DNI <span className="mono">{lead.dni}</span> · {lead.ciudad ?? "sin ciudad"} · {lead.intentos} intento(s) · cargado por {lead.cargadoPor.nombre}</p>
         {lead.nota && <p style={{ marginTop: 8 }}><b>Nota:</b> {lead.nota}</p>}
         <label htmlFor="n">Nota de la llamada</label>
         <textarea id="n" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: pidió que lo llamen después de las 18 h" />
@@ -120,10 +126,11 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
       <div className="tarjeta">
         <h2>Mi cola · {leads.length} pendiente(s)</h2>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Contacto</th><th>Teléfono</th><th>Estado</th><th /></tr>
+          <tr><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Estado</th><th /></tr>
           {leads.map((l) => (
             <tr key={l.id}>
               <td><b>{l.nombre}</b></td>
+              <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
               <td><span className="eti" style={{ color: ETI[l.estado].color, borderColor: ETI[l.estado].color }}>{ETI[l.estado].txt}</span></td>
               <td><button className="btn sec chico" onClick={() => { setAbierta(l.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}>Abrir</button></td>
@@ -137,9 +144,12 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
 
 /* ---------------- CARGA DE DATOS ---------------- */
 function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => void }) {
-  const [f, setF] = useState({ nombre: "", telefono: "", ciudad: "", nota: "", asignadoA: "" });
+  const vacio = { nombre: "", dni: "", telefono: "", ciudad: "", nota: "", asignadoA: "" };
+  const [f, setF] = useState(vacio);
   const [masivo, setMasivo] = useState(""), [msg, setMsg] = useState<any>(null);
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
+  const soloNum = (t: string) => t.replace(/\D/g, "");
+  const faltan = !f.nombre.trim() || soloNum(f.dni).length < 6 || soloNum(f.telefono).length < 6;
 
   async function enviar(cuerpo: any) {
     const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
@@ -154,8 +164,21 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         <h2>Cargar un contacto</h2>
         <p className="sub">Al guardarlo, al caller le llega el aviso por WhatsApp en el momento.</p>
         <div className="grid2">
-          <div><label>Nombre *</label><input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} /></div>
-          <div><label>Teléfono *</label><input className="mono" value={f.telefono} onChange={(e) => setF({ ...f, telefono: e.target.value })} /></div>
+          <div>
+            <label>Nombre y apellido <b style={{ color: "var(--noquiso)" }}>*</b></label>
+            <input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} placeholder="Ej: Carla Méndez" />
+          </div>
+          <div>
+            <label>DNI <b style={{ color: "var(--noquiso)" }}>*</b></label>
+            <input className="mono" inputMode="numeric" value={f.dni}
+                   onChange={(e) => setF({ ...f, dni: e.target.value })} placeholder="Solo números" />
+            {f.dni && soloNum(f.dni).length < 6 && <p className="sub" style={{ color: "var(--noquiso)" }}>El DNI es muy corto.</p>}
+          </div>
+          <div>
+            <label>Teléfono <b style={{ color: "var(--noquiso)" }}>*</b></label>
+            <input className="mono" inputMode="tel" value={f.telefono}
+                   onChange={(e) => setF({ ...f, telefono: e.target.value })} placeholder="Ej: 987 654 321" />
+          </div>
           <div><label>Ciudad</label><input value={f.ciudad} onChange={(e) => setF({ ...f, ciudad: e.target.value })} /></div>
           <div><label>Asignar a</label>
             <select value={f.asignadoA} onChange={(e) => setF({ ...f, asignadoA: e.target.value })}>
@@ -169,16 +192,19 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         {msg?.error && <div className="error">{msg.error}</div>}
         {msg?.creados > 0 && <div className="ok">{msg.creados} contacto(s) cargados y avisados.</div>}
         {msg?.rechazados?.length > 0 && <div className="error">Rechazados: {msg.rechazados.join(" · ")}</div>}
-        <button className="btn" style={{ marginTop: 14 }} onClick={() => { enviar(f); setF({ nombre: "", telefono: "", ciudad: "", nota: "", asignadoA: f.asignadoA }); }}>Guardar y avisar</button>
+        <button className="btn" style={{ marginTop: 14 }} disabled={faltan}
+                onClick={() => { enviar(f); setF({ ...vacio, asignadoA: f.asignadoA }); }}>
+          {faltan ? "Completá nombre, DNI y teléfono" : "Guardar y avisar"}
+        </button>
       </div>
 
       <div className="tarjeta">
         <h2>Carga masiva</h2>
-        <p className="sub">Una línea por persona: <span className="mono">nombre, teléfono, ciudad, nota</span></p>
+        <p className="sub">Una línea por persona: <span className="mono">nombre, DNI, teléfono, ciudad, nota</span></p>
         <textarea className="mono" style={{ minHeight: 120 }} value={masivo} onChange={(e) => setMasivo(e.target.value)} />
         <button className="btn sec" style={{ marginTop: 12 }} onClick={() => {
           const contactos = masivo.split("\n").map((l) => l.split(/[,;\t]/).map((t) => t.trim())).filter((p) => p[0])
-            .map(([nombre, telefono, ciudad, ...resto]) => ({ nombre, telefono, ciudad, nota: resto.join(", ") }));
+            .map(([nombre, dni, telefono, ciudad, ...resto]) => ({ nombre, dni, telefono, ciudad, nota: resto.join(", ") }));
           enviar({ contactos }); setMasivo("");
         }}>Cargar la lista</button>
       </div>
@@ -197,6 +223,7 @@ function Tabla({ leads }: { leads: Lead[] }) {
           <tr key={l.id}>
             <td className="mono">{String(l.id).padStart(4, "0")}</td>
             <td><b>{l.nombre}</b><br /><span style={{ color: "var(--tinta2)" }}>{l.ciudad ?? "—"}</span></td>
+            <td className="mono">{l.dni}</td>
             <td className="mono">{l.telefono}</td>
             <td>{l.asignadoA.nombre}</td>
             <td><span className="eti" style={{ color: ETI[l.estado].color, borderColor: ETI[l.estado].color }}>{ETI[l.estado].txt}</span></td>
@@ -296,5 +323,42 @@ function Avisos() {
         setMsg(r.ok ? "Reglas guardadas." : "No se pudo guardar.");
       }}>Guardar reglas</button>
     </div>
+  );
+}
+
+
+/* ---------------- HISTORIAL DEL CALLER ---------------- */
+function MiHistorial({ leads, sesion }: { leads: Lead[]; sesion: Sesion }) {
+  const [todas, setTodas] = useState<any[]>([]);
+  useEffect(() => {
+    fetch("/api/llamadas").then((r) => (r.ok ? r.json() : { llamadas: [] })).then((d) => setTodas(d.llamadas ?? []));
+  }, []);
+  const acep = todas.filter((l) => l.resultado === "ACEPTO").length;
+  return (
+    <>
+      <div className="grid4">
+        <div className="metrica"><span className="rotulo">Llamadas hechas</span><b>{todas.length}</b></div>
+        <div className="metrica"><span className="rotulo">Aceptaron</span><b>{acep}</b></div>
+        <div className="metrica"><span className="rotulo">Efectividad</span><b>{todas.length ? Math.round((acep / todas.length) * 100) : 0}%</b></div>
+        <div className="metrica"><span className="rotulo">En cola ahora</span><b>{leads.length}</b></div>
+      </div>
+      <div className="tarjeta">
+        <h2>Mis llamadas</h2>
+        <p className="sub">Cada línea quedó firmada con tu usuario y no se puede editar.</p>
+        <div className="tabla-scroll"><table><tbody>
+          <tr><th>Fecha</th><th>Contacto</th><th>DNI</th><th>Resultado</th><th>Nota</th></tr>
+          {todas.map((l) => (
+            <tr key={l.id}>
+              <td className="mono">{new Date(l.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+              <td>{l.lead?.nombre}</td>
+              <td className="mono">{l.lead?.dni}</td>
+              <td><span className="eti" style={{ color: ETI[l.resultado].color, borderColor: ETI[l.resultado].color }}>{ETI[l.resultado].txt}</span></td>
+              <td>{l.nota ?? "—"}</td>
+            </tr>
+          ))}
+          {!todas.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Todavía no registraste llamadas.</td></tr>}
+        </tbody></table></div>
+      </div>
+    </>
   );
 }
