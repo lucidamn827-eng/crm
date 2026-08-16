@@ -1,0 +1,47 @@
+:root{
+  --tinta:#101E28; --tinta2:#41545F; --papel:#E7EDF1; --sup:#fff; --linea:#C9D5DD;
+  --petroleo:#0F4C5C; --petroleo-cl:#E1EEF1; --ambar:#F2B705;
+  --acepto:#1B7F5A; --nocontesto:#B57F04; --noquiso:#B4442E; --volver:#39679C;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--papel);color:var(--tinta);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:15px;line-height:1.5}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+h1,h2{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;margin:0}
+.rotulo{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--tinta2)}
+.tope{background:var(--petroleo);color:#EAF4F6;border-bottom:3px solid var(--ambar);position:sticky;top:0;z-index:10}
+.tope-in,main,.pestanas{max-width:1120px;margin:0 auto;padding:0 16px}
+.tope-in{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}
+.jack{width:15px;height:15px;border-radius:50%;background:var(--ambar);box-shadow:inset 0 0 0 3px var(--petroleo),0 0 0 2px var(--ambar)}
+.chapa{background:rgba(255,255,255,.13);border-radius:99px;padding:3px 11px;font-size:12px;text-transform:uppercase}
+.pestanas{display:flex;gap:4px;overflow-x:auto}
+.pestana{background:none;border:0;border-bottom:3px solid transparent;padding:13px 12px;color:var(--tinta2);font-weight:600;cursor:pointer;white-space:nowrap}
+.pestana[data-on="true"]{color:var(--petroleo);border-bottom-color:var(--petroleo)}
+main{padding-top:18px;padding-bottom:60px}
+.tarjeta{background:var(--sup);border:1px solid var(--linea);border-radius:10px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px rgba(16,30,40,.06)}
+.sub{color:var(--tinta2);font-size:13.5px;margin:4px 0 0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--tinta2);margin:10px 0 5px}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--linea);border-radius:8px;background:#FBFDFE;font:inherit}
+.btn{background:var(--petroleo);color:#fff;border:0;border-radius:8px;padding:11px 18px;font-weight:600;cursor:pointer;font:inherit}
+.btn.sec{background:#fff;color:var(--petroleo);border:1px solid var(--petroleo)}
+.btn.chico{padding:7px 12px;font-size:13px}
+.numero{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:clamp(26px,7vw,40px);color:var(--tinta);text-decoration:none;display:block;word-break:break-all}
+.ficha-cab{background:linear-gradient(180deg,#12586B,#0F4C5C);color:#DFF0F3;padding:12px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:-18px -18px 16px;border-radius:10px 10px 0 0}
+.cronometro{font-family:"IBM Plex Mono",monospace;background:rgba(0,0,0,.22);padding:4px 10px;border-radius:6px}
+.resultados{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px;margin-top:14px}
+.res{border:2px solid;border-radius:9px;padding:14px 12px;background:#fff;font-weight:700;cursor:pointer;text-align:left;font:inherit;font-weight:700}
+.res.a{color:var(--acepto);border-color:var(--acepto)} .res.n{color:var(--nocontesto);border-color:var(--nocontesto)}
+.res.x{color:var(--noquiso);border-color:var(--noquiso)} .res.v{color:var(--volver);border-color:var(--volver)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--tinta2);padding:8px;border-bottom:2px solid var(--linea)}
+td{padding:9px 8px;border-bottom:1px solid #EDF2F5}
+.tabla-scroll{overflow-x:auto}
+.eti{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:99px;border:1px solid}
+.metrica{background:var(--sup);border:1px solid var(--linea);border-radius:10px;padding:14px}
+.metrica b{display:block;font-family:"IBM Plex Mono",monospace;font-size:27px;margin-top:5px}
+.error{background:#FBEDE9;border:1px solid #E0AA9B;color:#8E3320;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13.5px}
+.ok{background:#EAF6F1;border:1px solid #9ED3BC;color:#136245;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13.5px}
+.login{min-height:100vh;display:grid;place-items:center;padding:22px}
+.login .tarjeta{width:100%;max-width:420px}
+.tip{background:#FFF9E6;border-left:4px solid var(--ambar);border-radius:8px;padding:10px 13px;margin:10px 0;font-size:13.5px;color:#5A4708}

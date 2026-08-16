@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider  = "postgresql"
+  // Conexión con pool: la que usa la app en cada request.
+  url       = env("DATABASE_URL")
+  // Conexión directa: la que usan las migraciones (el pool las rompe).
+  directUrl = env("DIRECT_URL")
+}
+
+enum Rol {
+  ADMIN
+  CARGADOR
+  CALLER
+}
+enum EstadoLead {
+  PENDIENTE
+  NO_CONTESTO
+  VOLVER_A_LLAMAR
+  ACEPTO
+  NO_QUISO
+}
+
+model Usuario {
+  id             String    @id @default(cuid())
+  usuario        String    @unique
+  nombre         String
+  rol            Rol
+  hash           String
+  telefono       String?   // WhatsApp en formato E.164: 5491155554444
+  telegramId     String?   @unique // chat_id, se completa solo al hacer /start
+  codigoTg       String?   @unique // código de vinculación de un solo uso
+  notificar      Boolean   @default(true)
+  ventanaHasta   DateTime? // fin de la ventana de servicio de 24 h
+  activo         Boolean   @default(true)
+  creadoEn       DateTime  @default(now())
+  leadsCargados  Lead[]    @relation("cargador")
+  leadsAsignados Lead[]    @relation("caller")
+  llamadas       Llamada[]
+  avisos         Aviso[]
+  suscripciones  Suscripcion[]
+}
+
+model Lead {
+  id            Int        @id @default(autoincrement())
+  nombre        String
+  telefono      String     @unique
+  ciudad        String?
+  nota          String?
+  estado        EstadoLead @default(PENDIENTE)
+  intentos      Int        @default(0)
+  proximoAviso  DateTime?
+  avisosHoy     Int        @default(0)
+  cargadoPor    Usuario    @relation("cargador", fields: [cargadoPorId], references: [id])
+  cargadoPorId  String
+  asignadoA     Usuario    @relation("caller", fields: [asignadoAId], references: [id])
+  asignadoAId   String
+  creadoEn      DateTime   @default(now())
+  actualizadoEn DateTime   @updatedAt
+  llamadas      Llamada[]
+
+  @@index([asignadoAId, estado])
+  @@index([proximoAviso])
+}
+
+model Llamada {
+  id        Int        @id @default(autoincrement())
+  lead      Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  leadId    Int
+  caller    Usuario    @relation(fields: [callerId], references: [id])
+  callerId  String
+  resultado EstadoLead
+  nota      String?
+  duracion  Int        @default(0)
+  creadoEn  DateTime   @default(now())
+}
+
+model Aviso {
+  id        Int      @id @default(autoincrement())
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  usuarioId String
+  tipo      String
+  canal     String
+  cuerpo    String
+  entregado Boolean  @default(false)
+  error     String?
+  creadoEn  DateTime @default(now())
+}
+
+model Auditoria {
+  id       Int      @id @default(autoincrement())
+  usuario  String
+  rol      String
+  accion   String
+  detalle  String
+  creadoEn DateTime @default(now())
+}
+
+model Config {
+  clave String @id
+  valor String
+}
+
+model Suscripcion {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  agente    String?
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId String
+  creadoEn  DateTime @default(now())
+
+  @@index([usuarioId])
+}
