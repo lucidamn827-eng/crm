@@ -40,6 +40,9 @@ model Usuario {
   llamadas       Llamada[]
   avisos         Aviso[]
   suscripciones  Suscripcion[]
+  eventos        Evento[]
+  ultimoLatido   DateTime?
+  sesionActual   String?   // id de la única sesión válida: al entrar en otro lado, la anterior muere
 }
 
 model Lead {
@@ -47,12 +50,12 @@ model Lead {
   nombre        String
   dni           String     @unique
   telefono      String     @unique
-  ciudad        String?
   nota          String?
   estado        EstadoLead @default(PENDIENTE)
   intentos      Int        @default(0)
   proximoAviso  DateTime?
   avisosHoy     Int        @default(0)
+  enLlamadaDesde DateTime? // lo marca el caller al confirmar que va a llamar
   cargadoPor    Usuario    @relation("cargador", fields: [cargadoPorId], references: [id])
   cargadoPorId  String
   asignadoA     Usuario    @relation("caller", fields: [asignadoAId], references: [id])
@@ -71,10 +74,31 @@ model Llamada {
   leadId    Int
   caller    Usuario    @relation(fields: [callerId], references: [id])
   callerId  String
-  resultado EstadoLead
-  nota      String?
-  duracion  Int        @default(0)
-  creadoEn  DateTime   @default(now())
+  resultado    EstadoLead
+  nota         String?
+  duracion     Int      @default(0)  // segundos entre "voy a llamar" y el resultado
+  abiertoEn    DateTime @default(now()) // cuándo confirmó que iba a llamar
+  creadoEn     DateTime @default(now())
+  desdeIp      String?
+  agente       String?
+
+  @@index([callerId, creadoEn])
+}
+
+/// Bitácora de todo lo que hace cada persona: entradas, aperturas, resultados, inactividad.
+model Evento {
+  id        Int      @id @default(autoincrement())
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId String
+  tipo      String   // login, logout, abrio_ficha, descarto_ficha, resultado, cancelo, inactivo, latido
+  leadId    Int?
+  detalle   String?
+  segundos  Int?
+  ip        String?
+  creadoEn  DateTime @default(now())
+
+  @@index([usuarioId, creadoEn])
+  @@index([tipo, creadoEn])
 }
 
 model Aviso {

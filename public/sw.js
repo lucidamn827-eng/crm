@@ -6,8 +6,8 @@ self.addEventListener("push", (event) => {
   let d = { titulo: "Central", cuerpo: "Tenés novedades", url: "/panel", tag: "central" };
   try { d = { ...d, ...event.data.json() }; } catch (_) {}
 
-  event.waitUntil(
-    self.registration.showNotification(d.titulo, {
+  event.waitUntil((async () => {
+    return self.registration.showNotification(d.titulo, {
       body: d.cuerpo,
       icon: "/icono-192.png",
       badge: "/icono-192.png",
@@ -17,8 +17,9 @@ self.addEventListener("push", (event) => {
       vibrate: [200, 100, 200, 100, 300],
       data: { url: d.url },
       actions: [{ action: "abrir", title: "Ver la ficha" }],
-    })
-  );
+      silent: false, // deja sonar el tono del sistema
+    });
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {

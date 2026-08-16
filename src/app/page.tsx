@@ -1,11 +1,17 @@
 "use client";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-export default function Login() {
+function Formulario() {
   const [usuario, setUsuario] = useState(""), [clave, setClave] = useState("");
   const [error, setError] = useState(""), [cargando, setCargando] = useState(false);
   const router = useRouter();
+  const motivo = useSearchParams().get("m");
+  const aviso =
+    motivo === "desplazada" ? "Tu sesión se cerró porque entraste con esta cuenta en otro dispositivo."
+    : motivo === "vencida" ? "Tu sesión ya no es válida. Volvé a entrar."
+    : "";
 
   async function entrar() {
     setCargando(true); setError("");
@@ -33,6 +39,7 @@ export default function Login() {
           <label htmlFor="c">Contraseña</label>
           <input id="c" type="password" value={clave} onChange={(e) => setClave(e.target.value)}
                  onKeyDown={(e) => e.key === "Enter" && entrar()} autoComplete="current-password" />
+          {aviso && !error && <div className="error">{aviso}</div>}
           {error && <div className="error">{error}</div>}
           <button className="btn" style={{ width: "100%", marginTop: 16 }} onClick={entrar} disabled={cargando}>
             {cargando ? "Entrando..." : "Entrar"}
@@ -40,5 +47,14 @@ export default function Login() {
         </div>
       </div>
     </div>
+  );
+}
+
+
+export default function Login() {
+  return (
+    <Suspense fallback={<div className="login"><div className="tarjeta">Cargando…</div></div>}>
+      <Formulario />
+    </Suspense>
   );
 }

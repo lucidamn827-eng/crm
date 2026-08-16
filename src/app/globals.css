@@ -45,3 +45,9 @@ td{padding:9px 8px;border-bottom:1px solid #EDF2F5}
 .login{min-height:100vh;display:grid;place-items:center;padding:22px}
 .login .tarjeta{width:100%;max-width:420px}
 .tip{background:#FFF9E6;border-left:4px solid var(--ambar);border-radius:8px;padding:10px 13px;margin:10px 0;font-size:13.5px;color:#5A4708}
+
+/* ---- ventana modal ---- */
+.velo{position:fixed;inset:0;background:rgba(16,30,40,.55);display:grid;place-items:center;padding:18px;z-index:50;overflow:auto}
+.modal{background:var(--sup);border-radius:12px;padding:22px;width:100%;max-width:560px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.modal h2{font-size:20px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
