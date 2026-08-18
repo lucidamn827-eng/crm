@@ -1039,7 +1039,7 @@ const METAS = {
     { meta: 40, bono: 100 },
     { meta: 50, bono: 150 },
     { meta: 60, bono: 200 },
-    { meta: 70, bono: 400 },
+    { meta: 90, bono: 400 },
   ],
   CARGADOR: [
     { meta: 150, bono: 50 },
