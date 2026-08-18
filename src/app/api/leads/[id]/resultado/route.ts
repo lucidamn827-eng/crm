@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { exigir, auditar } from "@/lib/auth";
-import { programarSiguiente } from "@/lib/notificaciones";
+import { programarSiguiente, avisarAceptado } from "@/lib/notificaciones";
 import { registrar, ipDe } from "@/lib/eventos";
 
 const VALIDOS = ["ACEPTO", "NO_QUISO", "NO_CONTESTO", "VOLVER_A_LLAMAR"];
@@ -30,6 +30,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
     await db.lead.update({ where: { id }, data: { estado: resultado, intentos: { increment: 1 }, enLlamadaDesde: null } });
     await programarSiguiente(id, resultado);
+    // El spamer que cargó la data se entera del cierre en el momento.
+    if (resultado === "ACEPTO") await avisarAceptado(id, s.nombre);
     await registrar(s, "resultado", { leadId: id, detalle: `${resultado} · ${lead.nombre}`, segundos: duracion, ip });
     await auditar(s, "Resultado de llamada", `Ficha ${id} (${lead.telefono}): ${resultado} en ${duracion}s`);
     return Response.json({ ok: true, duracion });

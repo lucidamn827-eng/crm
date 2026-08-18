@@ -3,7 +3,7 @@ self.addEventListener("install", (e) => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 
 self.addEventListener("push", (event) => {
-  let d = { titulo: "Central", cuerpo: "Tenés novedades", url: "/panel", tag: "central" };
+  let d = { titulo: "Lima Limón", cuerpo: "Tenés novedades", url: "/panel", tag: "central" };
   try { d = { ...d, ...event.data.json() }; } catch (_) {}
 
   event.waitUntil((async () => {

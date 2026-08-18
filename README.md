@@ -1,4 +1,4 @@
-# Central · CRM de call center
+# Lima Limón · CRM de call center
 
 Next.js 15 + Postgres (Prisma) + WhatsApp Cloud API, listo para desplegar en Vercel.
 

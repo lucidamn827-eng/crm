@@ -49,6 +49,32 @@ export async function GET(req: Request) {
       };
     });
 
+    // Rendimiento de cada spamer: cuánta data subió y en qué terminó.
+    const spamers = await db.usuario.findMany({ where: { rol: "CARGADOR" }, select: { id: true, nombre: true, usuario: true, activo: true } });
+    const subidas = await db.lead.findMany({
+      where: { creadoEn: { gte: desde } },
+      select: { cargadoPorId: true, estado: true, intentos: true, creadoEn: true },
+    });
+
+    // Corte del día en la zona horaria de la operación.
+    const zona = process.env.TZ_OPERACION ?? "America/Lima";
+    const diaDe = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: zona }).format(d); // AAAA-MM-DD
+    const hoy = diaDe(new Date());
+    const dias = [...new Set(subidas.map((l) => diaDe(l.creadoEn)))].sort().reverse().slice(0, 7);
+    const porSpamer = spamers.map((sp) => {
+      const suyas = subidas.filter((l) => l.cargadoPorId === sp.id);
+      const cuenta = (e: string) => suyas.filter((l) => l.estado === e).length;
+      const trabajadas = suyas.filter((l) => l.intentos > 0).length;
+      return {
+        id: sp.id, nombre: sp.nombre, usuario: sp.usuario, activo: sp.activo,
+        subidas: suyas.length, trabajadas, sinTocar: suyas.length - trabajadas,
+        acepto: cuenta("ACEPTO"), noQuiso: cuenta("NO_QUISO"),
+        conversion: trabajadas ? Math.round((cuenta("ACEPTO") / trabajadas) * 100) : 0,
+        hoy: suyas.filter((l) => diaDe(l.creadoEn) === hoy).length,
+        porDia: dias.map((d) => ({ dia: d, n: suyas.filter((l) => diaDe(l.creadoEn) === d).length })),
+      };
+    });
+
     const bitacora = await db.evento.findMany({
       where: { creadoEn: { gte: desde } },
       include: { usuario: { select: { nombre: true, rol: true } } },
@@ -58,6 +84,8 @@ export async function GET(req: Request) {
 
     return Response.json({
       porCaller,
+      porSpamer,
+      dias,
       sospechosas: llamadas.filter((l) => l.duracion < SOSPECHOSA).slice(0, 100),
       llamadas: llamadas.slice(0, 200),
       bitacora,

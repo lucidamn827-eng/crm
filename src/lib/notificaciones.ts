@@ -37,7 +37,7 @@ export async function avisarAsignacion(leadId: number) {
   const c = await config();
   const cuerpo =
     `Nuevo contacto para llamar: ${lead.nombre} (${lead.telefono})` +
-    ` DNI ${lead.dni}. Lo cargó ${lead.cargadoPor.nombre}. Entrá al panel para tomarlo.`;
+    `${lead.ciudad ? ` - ${lead.ciudad}` : ""}. Lo cargó ${lead.cargadoPor.nombre}. Entrá al panel para tomarlo.`;
 
   await enviarAviso({
     destinatario: lead.asignadoA,
@@ -131,4 +131,28 @@ export async function correrRecordatorios() {
 /** Se llama una vez por día para volver a habilitar el tope de avisos. */
 export async function reiniciarContadores() {
   await db.lead.updateMany({ where: { avisosHoy: { gt: 0 } }, data: { avisosHoy: 0 } });
+}
+
+
+/**
+ * Felicitación al spamer cuando un caller cierra su data con "Aceptó".
+ * Le cierra el círculo: sabe que lo que cargó terminó bien y quién lo logró.
+ */
+export async function avisarAceptado(leadId: number, callerNombre: string) {
+  const lead = await db.lead.findUnique({
+    where: { id: leadId },
+    include: { cargadoPor: true },
+  });
+  if (!lead?.cargadoPor) return;
+
+  const cuerpo =
+    `🎉 ¡Enhorabuena ${lead.cargadoPor.nombre}! Tu caller ${callerNombre} concluyó el proceso con ` +
+    `${lead.nombre} · DNI ${lead.dni} · ${lead.telefono}.`;
+
+  await enviarAviso({
+    destinatario: lead.cargadoPor,
+    tipo: "cierre_aceptado",
+    cuerpo,
+    parametros: [lead.cargadoPor.nombre, callerNombre, lead.nombre],
+  });
 }

@@ -7,7 +7,7 @@ export async function GET() {
     const s = await exigir("ADMIN", "CALLER");
     const llamadas = await db.llamada.findMany({
       where: s.rol === "CALLER" ? { callerId: s.id } : {},
-      include: { lead: { select: { nombre: true, dni: true, telefono: true } } },
+      include: { lead: { select: { nombre: true, dni: true, telefono: true, cargadoPor: { select: { nombre: true } } } } },
       orderBy: { creadoEn: "desc" },
       take: 300,
     });

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { Marca } from "./Logo";
 
 function Formulario() {
   const [usuario, setUsuario] = useState(""), [clave, setClave] = useState("");
@@ -28,11 +29,11 @@ function Formulario() {
   return (
     <div className="login">
       <div>
-        <div style={{ display: "flex", gap: 9, alignItems: "center", color: "var(--petroleo)", marginBottom: 14, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>
-          <span className="jack" /> Central
+        <div style={{ color: "var(--lima-cascara)", marginBottom: 16, display: "flex", justifyContent: "center" }}>
+          <Marca size={54} sub="CRM de llamadas" />
         </div>
         <div className="tarjeta">
-          <h1>Entrar a la central</h1>
+          <h1>Entrar</h1>
           <p className="sub">Cada persona entra con su usuario. Todo queda firmado con su nombre.</p>
           <label htmlFor="u">Usuario</label>
           <input id="u" value={usuario} onChange={(e) => setUsuario(e.target.value)} autoComplete="username" />

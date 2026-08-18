@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import Avisador from "./Avisador";
+import { Marca } from "../Logo";
 
 type Sesion = { id: string; usuario: string; nombre: string; rol: "ADMIN" | "CARGADOR" | "CALLER" };
 type Lead = {
@@ -11,7 +12,7 @@ type Lead = {
   llamadas: { nota?: string | null; creadoEn: string }[];
 };
 type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean };
-type Llamada = { id: number; resultado: string; nota?: string | null; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string } };
+type Llamada = { id: number; resultado: string; nota?: string | null; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
 
 const ETI: Record<string, { txt: string; color: string }> = {
   PENDIENTE: { txt: "Sin llamar", color: "var(--petroleo)" },
@@ -42,9 +43,9 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"]];
 
   const marca =
-    sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#0F4C5C" } :
-    sesion.rol === "CARGADOR" ? { titulo: "Mesa de spamer", color: "#5B3A8C" } :
-    { titulo: "Supervisión", color: "#123B2C" };
+    sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#14532D" } :
+    sesion.rol === "CARGADOR" ? { titulo: "Mesa de spamer", color: "#4C1D95" } :
+    { titulo: "Supervisión", color: "#1F2937" };
 
   const [vista, setVista] = useState(pestanas[0][0]);
   const [avisosOk, setAvisosOk] = useState(sesion.rol !== "CALLER");
@@ -84,9 +85,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     <>
       <header className="tope" style={{ background: marca.color }}>
         <div className="tope-in">
-          <span style={{ display: "flex", gap: 9, alignItems: "center", fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase" }}>
-            <span className="jack" /> Central · {marca.titulo}
-          </span>
+          <Marca size={36} sub={marca.titulo} />
           <span style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}>
             {sesion.nombre} <span className="chapa">{ROL[sesion.rol]}</span>
             <button className="btn chico sec" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.push("/"); }}>Salir</button>
@@ -151,6 +150,7 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>¿Vas a llamar a este cliente ahora?</h2>
             <p className="sub">{porConfirmar.nombre} · DNI {porConfirmar.dni}</p>
+            <p className="sub">Data cargada por <b>{porConfirmar.cargadoPor?.nombre ?? "—"}</b></p>
             <div className="numero" style={{ fontSize: 26, margin: "10px 0" }}>{porConfirmar.telefono}</div>
             <p className="sub">Si decís que sí, tu supervisor va a ver que estás en llamada y arranca el cronómetro.</p>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
@@ -172,7 +172,10 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
           </div>
           <span className="rotulo">Tocá el número para llamar</span>
           <a className="numero" href={`tel:${enCurso.telefono.replace(/\D/g, "")}`}>{enCurso.telefono}</a>
-          <p className="sub">DNI <span className="mono">{enCurso.dni}</span> · {enCurso.intentos} intento(s)</p>
+          <p className="sub">
+            DNI <span className="mono">{enCurso.dni}</span> · {enCurso.intentos} intento(s) ·
+            data de <b>{enCurso.cargadoPor?.nombre ?? "—"}</b>
+          </p>
           {enCurso.nota && <p style={{ marginTop: 8 }}><b>Nota:</b> {enCurso.nota}</p>}
           <label>Nota de la llamada</label>
           <textarea value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: pidió que lo llamen después de las 18 h" />
@@ -194,18 +197,19 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
         <h2>Mis pendientes · {pendientes.length}</h2>
         <p className="sub">Solo ves los contactos asignados a vos.</p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Estado</th><th>Intentos</th><th /></tr>
+          <tr><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Estado</th><th>Intentos</th><th /></tr>
           {pendientes.map((l) => (
             <tr key={l.id}>
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
+              <td>{l.cargadoPor?.nombre ?? "—"}</td>
               <td><span className="eti" style={{ color: eti(l.estado).color, borderColor: eti(l.estado).color }}>{eti(l.estado).txt}</span></td>
               <td className="mono">{l.intentos}</td>
               <td><button className="btn sec chico" disabled={!!enCurso} onClick={() => setPorConfirmar(l)}>Llamar</button></td>
             </tr>
           ))}
-          {!pendientes.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes.</td></tr>}
+          {!pendientes.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes.</td></tr>}
         </tbody></table></div>
         {enCurso && <div className="tip">Terminá la llamada en curso antes de abrir otra ficha.</div>}
       </div>
@@ -240,13 +244,14 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
         <h2>Mis contactos trabajados</h2>
         <p className="sub">Una fila por persona, con el resultado más reciente. Tocá los intentos para ver el detalle.</p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Última llamada</th><th>Contacto</th><th>DNI</th><th>Resultado actual</th><th>Intentos</th><th>Nota</th></tr>
+          <tr><th>Última llamada</th><th>Contacto</th><th>DNI</th><th>Spamer</th><th>Resultado actual</th><th>Intentos</th><th>Nota</th></tr>
           {filas.map((f) => (
             <Fragment key={f.ultima.leadId}>
               <tr>
                 <td className="mono">{new Date(f.ultima.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
                 <td>{f.ultima.lead?.nombre}</td>
                 <td className="mono">{f.ultima.lead?.dni}</td>
+                <td>{f.ultima.lead?.cargadoPor?.nombre ?? "—"}</td>
                 <td><span className="eti" style={{ color: eti(f.ultima.resultado).color, borderColor: eti(f.ultima.resultado).color }}>{eti(f.ultima.resultado).txt}</span></td>
                 <td>
                   <button className="btn sec chico" onClick={() => setAbierto(abierto === f.ultima.leadId ? null : f.ultima.leadId)}>
@@ -258,7 +263,7 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
               {abierto === f.ultima.leadId && f.intentos.map((i) => (
                 <tr key={i.id} style={{ background: "#F6F9FB" }}>
                   <td className="mono" style={{ paddingLeft: 24 }}>{new Date(i.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                  <td colSpan={2} style={{ color: "var(--tinta2)" }}>intento previo</td>
+                  <td colSpan={3} style={{ color: "var(--tinta2)" }}>intento previo</td>
                   <td><span className="eti" style={{ color: eti(i.resultado).color, borderColor: eti(i.resultado).color }}>{eti(i.resultado).txt}</span></td>
                   <td />
                   <td>{i.nota ?? "—"}</td>
@@ -266,7 +271,7 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
               ))}
             </Fragment>
           ))}
-          {!filas.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>Todavía no registraste llamadas.</td></tr>}
+          {!filas.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Todavía no registraste llamadas.</td></tr>}
         </tbody></table></div>
       </div>
     </>
@@ -292,7 +297,7 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
         <h2>Quién está llamando ahora</h2>
         <p className="sub">Se actualiza solo cada 10 segundos.</p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Caller</th><th>Estado</th><th>Contacto</th><th>Teléfono</th><th>Tiempo</th><th /></tr>
+          <tr><th>Caller</th><th>Estado</th><th>Contacto</th><th>Spamer</th><th>Teléfono</th><th>Tiempo</th><th /></tr>
           {callers.map((c) => {
             const l = enLlamada.find((x) => x.asignadoAId === c.id);
             return (
@@ -304,6 +309,7 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
                   </span>
                 </td>
                 <td>{l ? `${l.nombre} (DNI ${l.dni})` : "—"}</td>
+                <td>{l?.cargadoPor?.nombre ?? "—"}</td>
                 <td className="mono">{l?.telefono ?? "—"}</td>
                 <td className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{l ? mmss(desde(l.enLlamadaDesde)) : "—"}</td>
                 <td>{l && <button className="btn sec chico" onClick={async () => {
@@ -313,7 +319,7 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
               </tr>
             );
           })}
-          {!callers.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>No hay callers activos.</td></tr>}
+          {!callers.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>No hay callers activos.</td></tr>}
         </tbody></table></div>
         <div className="tip">“Liberar ficha” devuelve el contacto a la cola si un caller se quedó trabado o cerró la app en medio de una llamada.</div>
       </div>
@@ -468,7 +474,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
         {editable === "spamer" && <p className="sub">Podés corregir o borrar una ficha mientras el caller no la haya llamado todavía.</p>}
         <div className="tabla-scroll"><table><tbody>
           <tr>
-            <th>Ficha</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
+            <th>Ficha</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
           </tr>
           {leads.map((l) => (
             <tr key={l.id}>
@@ -476,6 +482,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
+              <td>{l.cargadoPor?.nombre ?? "—"}</td>
               <td>{l.asignadoA?.nombre ?? "—"}</td>
               <td>
                 {l.enLlamadaDesde
@@ -493,7 +500,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               )}
             </tr>
           ))}
-          {!leads.length && <tr><td colSpan={editable ? 9 : 8} style={{ color: "var(--tinta2)" }}>Todavía no hay contactos cargados.</td></tr>}
+          {!leads.length && <tr><td colSpan={editable ? 10 : 9} style={{ color: "var(--tinta2)" }}>Todavía no hay contactos cargados.</td></tr>}
         </tbody></table></div>
       </div>
     </>
@@ -599,7 +606,7 @@ function Avisos() {
 function Supervision() {
   const [d, setD] = useState<any>(null);
   const [dias, setDias] = useState(7);
-  const [tab, setTab] = useState<"equipo" | "alertas" | "bitacora">("equipo");
+  const [tab, setTab] = useState<"equipo" | "spamers" | "alertas" | "bitacora">("equipo");
 
   useEffect(() => {
     fetch(`/api/supervision?dias=${dias}`).then((r) => (r.ok ? r.json() : null)).then(setD);
@@ -623,7 +630,7 @@ function Supervision() {
           </button>
         ))}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {([["equipo", "Equipo"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
+          {([["equipo", "Callers"], ["spamers", "Spamers"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
             <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
           ))}
         </span>
@@ -660,6 +667,77 @@ function Supervision() {
             Cada celda de resultado muestra <b>cantidad · promedio</b>. “Sospechosas” son llamadas cerradas en menos de {d.umbral} segundos:
             no hay conversación posible en ese tiempo. “Descartes” son fichas que abrió y cerró sin llamar.
           </div>
+        </div>
+      )}
+
+      {tab === "spamers" && (
+        <div className="tarjeta">
+          <h2>Data cargada por spamer</h2>
+          <p className="sub">Si uno falta y otro lo cubre, acá ves de quién es cada lote y qué rindió.</p>
+          <div className="tabla-scroll"><table><tbody>
+            <tr><th>Spamer</th><th>Estado</th><th>Subió HOY</th><th>Data en el período</th><th>Ya trabajada</th><th>Sin tocar</th><th>Aceptaron</th><th>No quisieron</th><th>Conversión</th></tr>
+            {d.porSpamer?.map((sp: any) => (
+              <tr key={sp.id}>
+                <td><b>{sp.nombre}</b><br /><span className="mono" style={{ color: "var(--tinta2)" }}>{sp.usuario}</span></td>
+                <td>{sp.activo ? "Activo" : "Desactivado"}</td>
+                <td className="mono" style={{ fontSize: 17, fontWeight: 700, color: sp.hoy ? "var(--acepto)" : "var(--tinta2)" }}>{sp.hoy ?? 0}</td>
+                <td className="mono">{sp.subidas}</td>
+                <td className="mono">{sp.trabajadas}</td>
+                <td className="mono" style={{ color: sp.sinTocar ? "var(--nocontesto)" : undefined }}>{sp.sinTocar}</td>
+                <td className="mono">{sp.acepto}</td>
+                <td className="mono">{sp.noQuiso}</td>
+                <td className="mono" style={{ fontWeight: 700 }}>{sp.conversion}%</td>
+              </tr>
+            ))}
+            {!d.porSpamer?.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>No hay spamers cargados.</td></tr>}
+          </tbody></table></div>
+          <div className="tip">
+            “Sin tocar” es data que subió y ningún caller llamó todavía. Si crece, o falta gente llamando o se está cargando más de lo que el equipo puede trabajar.
+          </div>
+        </div>
+      )}
+
+      {tab === "spamers" && !!d.dias?.length && (
+        <div className="tarjeta">
+          <h2>Carga diaria</h2>
+          <p className="sub">Cuántos contactos subió cada spamer, día por día.</p>
+          <div className="tabla-scroll"><table><tbody>
+            <tr>
+              <th>Spamer</th>
+              {d.dias.map((dia: string) => (
+                <th key={dia} style={{ textAlign: "center" }}>
+                  {new Date(dia + "T12:00:00").toLocaleDateString("es", { day: "2-digit", month: "2-digit" })}
+                </th>
+              ))}
+              <th style={{ textAlign: "center" }}>Total</th>
+            </tr>
+            {d.porSpamer?.map((sp: any) => (
+              <tr key={sp.id}>
+                <td><b>{sp.nombre}</b></td>
+                {d.dias.map((dia: string) => {
+                  const n = sp.porDia?.find((x: any) => x.dia === dia)?.n ?? 0;
+                  return (
+                    <td key={dia} className="mono" style={{ textAlign: "center", color: n ? undefined : "var(--linea)" }}>
+                      {n || "·"}
+                    </td>
+                  );
+                })}
+                <td className="mono" style={{ textAlign: "center", fontWeight: 700 }}>{sp.subidas}</td>
+              </tr>
+            ))}
+            <tr style={{ background: "#F6F9F3" }}>
+              <td><b>Total del equipo</b></td>
+              {d.dias.map((dia: string) => (
+                <td key={dia} className="mono" style={{ textAlign: "center", fontWeight: 700 }}>
+                  {d.porSpamer?.reduce((n: number, sp: any) => n + (sp.porDia?.find((x: any) => x.dia === dia)?.n ?? 0), 0)}
+                </td>
+              ))}
+              <td className="mono" style={{ textAlign: "center", fontWeight: 700 }}>
+                {d.porSpamer?.reduce((n: number, sp: any) => n + sp.subidas, 0)}
+              </td>
+            </tr>
+          </tbody></table></div>
+          <div className="tip">Tocá “30 días” arriba para ver más historial. Se muestran los últimos 7 días con movimiento.</div>
         </div>
       )}
 

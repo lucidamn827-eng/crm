@@ -24,7 +24,7 @@ export async function enviarAviso(opts: {
   if (!d.notificar) return { enviado: false, motivo: "notificaciones apagadas" };
 
   const push = await enviarPush(d.id, {
-    titulo: ficha ? `Contacto para llamar: ${ficha.nombre}` : "Central",
+    titulo: ficha ? `Contacto para llamar: ${ficha.nombre}` : "Lima Limón",
     cuerpo: ficha ? `${ficha.telefono}${ficha.ciudad ? ` · ${ficha.ciudad}` : ""}` : cuerpo,
     url: "/panel",
     tag: `caller-${d.id}`,
