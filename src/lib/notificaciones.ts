@@ -35,9 +35,6 @@ export async function avisarAsignacion(leadId: number) {
   const lead = await db.lead.findUnique({ where: { id: leadId }, include: { asignadoA: true, cargadoPor: true } });
   if (!lead) return;
   const c = await config();
-  const cuerpo =
-    `Nuevo contacto para llamar: ${lead.nombre} (${lead.telefono})` +
-    `${lead.ciudad ? ` - ${lead.ciudad}` : ""}. Lo cargó ${lead.cargadoPor.nombre}. Entrá al panel para tomarlo.`;
 
   await enviarAviso({
     destinatario: lead.asignadoA,

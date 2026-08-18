@@ -10,7 +10,8 @@ function Formulario() {
   const router = useRouter();
   const motivo = useSearchParams().get("m");
   const aviso =
-    motivo === "desplazada" ? "Tu sesión se cerró porque entraste con esta cuenta en otro dispositivo."
+    motivo === "inactividad" ? "Por seguridad cerramos tu sesión tras 1 hora sin actividad. Volvé a entrar."
+    : motivo === "desplazada" ? "Tu sesión se cerró porque entraste con esta cuenta en otro dispositivo."
     : motivo === "vencida" ? "Tu sesión ya no es válida. Volvé a entrar."
     : "";
 
@@ -23,7 +24,7 @@ function Formulario() {
     const d = await r.json();
     setCargando(false);
     if (!r.ok) return setError(d.error ?? "No se pudo entrar.");
-    router.push("/panel");
+    router.push("/panel?bienvenida=1");
   }
 
   return (

@@ -28,10 +28,10 @@ export const enviarTexto = (chatId: string, texto: string, teclado?: unknown) =>
   });
 
 /** Ficha completa con botones: el caller llama y marca el resultado sin salir del chat. */
-export function fichaTelegram(lead: { id: number; nombre: string; telefono: string; ciudad?: string | null; nota?: string | null; intentos: number }) {
+export function fichaTelegram(lead: { id: number; nombre: string; dni?: string; telefono: string; nota?: string | null; intentos: number }) {
   const texto =
     `<b>Ficha ${String(lead.id).padStart(4, "0")}</b>\n` +
-    `${lead.nombre}${lead.ciudad ? ` · ${lead.ciudad}` : ""}\n` +
+    `${lead.nombre}${lead.dni ? ` · DNI ${lead.dni}` : ""}\n` +
     `<a href="tel:${lead.telefono.replace(/\D/g, "")}">${lead.telefono}</a>\n` +
     (lead.nota ? `\n<i>${lead.nota}</i>\n` : "") +
     (lead.intentos ? `\nIntentos previos: ${lead.intentos}` : "");

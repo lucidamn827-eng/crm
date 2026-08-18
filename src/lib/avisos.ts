@@ -18,14 +18,14 @@ export async function enviarAviso(opts: {
   cuerpo: string;
   parametros: string[];
   /** Si viene una ficha, en Telegram se manda con los botones de resultado. */
-  ficha?: { id: number; nombre: string; telefono: string; ciudad?: string | null; nota?: string | null; intentos: number };
+  ficha?: { id: number; nombre: string; dni?: string; telefono: string; nota?: string | null; intentos: number };
 }) {
   const { destinatario: d, tipo, cuerpo, parametros, ficha } = opts;
   if (!d.notificar) return { enviado: false, motivo: "notificaciones apagadas" };
 
   const push = await enviarPush(d.id, {
     titulo: ficha ? `Contacto para llamar: ${ficha.nombre}` : "Lima Limón",
-    cuerpo: ficha ? `${ficha.telefono}${ficha.ciudad ? ` · ${ficha.ciudad}` : ""}` : cuerpo,
+    cuerpo: ficha ? `${ficha.telefono}${ficha.dni ? ` · DNI ${ficha.dni}` : ""}` : cuerpo,
     url: "/panel",
     tag: `caller-${d.id}`,
   }).catch(() => ({ enviado: false }));

@@ -14,8 +14,13 @@ h1,h2{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;margin:0}
 .tope-in{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding-top:10px;padding-bottom:10px}
 .chapa{background:rgba(255,255,255,.13);border-radius:99px;padding:3px 11px;font-size:12px;text-transform:uppercase}
 .pestanas{display:flex;gap:4px;overflow-x:auto}
-.pestana{background:none;border:0;border-bottom:3px solid transparent;padding:13px 12px;color:var(--tinta2);font-weight:600;cursor:pointer;white-space:nowrap}
-.pestana[data-on="true"]{color:var(--petroleo);border-bottom-color:var(--petroleo)}
+.pestanas{margin-top:2px}
+.pestana{
+  background:none;border:0;border-bottom:3px solid transparent;padding:13px 12px;
+  color:rgba(255,255,255,.72);font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.pestana:hover{color:#fff}
+.pestana[data-on="true"]{color:#fff;border-bottom-color:var(--lima-acento)}
 main{padding-top:18px;padding-bottom:60px}
 .tarjeta{background:var(--sup);border:1px solid var(--linea);border-radius:12px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px rgba(20,52,32,.07)}
 .sub{color:var(--tinta2);font-size:13.5px;margin:4px 0 0}
@@ -51,3 +56,25 @@ td{padding:9px 8px;border-bottom:1px solid #EDF2E9}
 .modal{background:var(--sup);border-radius:12px;padding:22px;width:100%;max-width:560px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
 .modal h2{font-size:20px}
 .btn:disabled{opacity:.55;cursor:not-allowed}
+
+
+/* ---- El cielo es el límite ---- */
+.cielo{
+  background:linear-gradient(180deg,#7FB2E5 0%,#A9CFF0 45%,#DCEBF7 100%);
+  border-radius:14px;padding:22px 16px;position:relative;overflow:hidden;
+}
+.peldano{
+  display:flex;align-items:center;gap:14px;background:#fff;border-radius:999px;
+  padding:12px 18px;margin:0 auto 14px;max-width:520px;position:relative;
+  box-shadow:0 6px 16px rgba(20,52,45,.16);border:3px solid transparent;
+}
+.peldano.logrado{background:#EAF6F1;border-color:var(--acepto)}
+.peldano.siguiente{border-color:var(--ambar);box-shadow:0 8px 22px rgba(168,196,37,.45)}
+.peldano .meta{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:19px;min-width:56px}
+.peldano .bono{margin-left:auto;font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:21px}
+.nube{position:absolute;background:rgba(255,255,255,.55);border-radius:999px;pointer-events:none}
+.escalon-linea{width:4px;height:16px;background:rgba(255,255,255,.7);margin:0 auto 14px;border-radius:2px}
+.globo{
+  background:#fff;border-radius:12px;padding:14px 16px;max-width:520px;margin:0 auto 16px;
+  box-shadow:0 6px 16px rgba(20,52,45,.18);text-align:center;
+}

@@ -4,7 +4,8 @@ import bcrypt from "bcryptjs";
 import { db } from "./db";
 
 const secreto = () => new TextEncoder().encode(process.env.JWT_SECRET!);
-const DIAS = 30; // la sesión no se cae sola durante el turno ni entre días
+const DIAS = 30;                // vida máxima del token
+export const MIN_INACTIVIDAD = 60; // se cierra sola tras 1 h sin actividad
 
 export type Rol = "ADMIN" | "CARGADOR" | "CALLER";
 export type Sesion = { id: string; usuario: string; nombre: string; rol: Rol; sid: string };
@@ -15,7 +16,7 @@ export const verificarClave = (clave: string, hash: string) => bcrypt.compare(cl
 /** Sesión única: cada login genera un id nuevo y anula el del dispositivo anterior. */
 export async function crearSesion(datos: Omit<Sesion, "sid">) {
   const sid = crypto.randomUUID();
-  await db.usuario.update({ where: { id: datos.id }, data: { sesionActual: sid } });
+  await db.usuario.update({ where: { id: datos.id }, data: { sesionActual: sid, ultimoLatido: new Date() } });
 
   const token = await new SignJWT({ ...datos, sid } as any)
     .setProtectedHeader({ alg: "HS256" })
@@ -53,10 +54,25 @@ export async function exigir(...roles: Rol[]): Promise<Sesion> {
   if (!s) throw new Response("Sin sesión", { status: 401 });
   if (roles.length && !roles.includes(s.rol)) throw new Response("Sin permiso", { status: 403 });
 
-  const u = await db.usuario.findUnique({ where: { id: s.id }, select: { activo: true, sesionActual: true } });
+  const u = await db.usuario.findUnique({
+    where: { id: s.id },
+    select: { activo: true, sesionActual: true, ultimoLatido: true },
+  });
   if (!u?.activo) throw new Response("Usuario desactivado", { status: 401 });
   if (u.sesionActual && s.sid && u.sesionActual !== s.sid)
     throw new Response(JSON.stringify({ error: "desplazada" }), { status: 409, headers: { "Content-Type": "application/json" } });
+
+  // Inactividad: una hora sin usar la app y hay que volver a entrar.
+  const inactivo = u.ultimoLatido ? Date.now() - u.ultimoLatido.getTime() : 0;
+  if (inactivo > MIN_INACTIVIDAD * 60_000) {
+    await db.usuario.update({ where: { id: s.id }, data: { sesionActual: null } }).catch(() => {});
+    throw new Response(JSON.stringify({ error: "inactividad" }), { status: 440, headers: { "Content-Type": "application/json" } });
+  }
+
+  // Cada pedido cuenta como actividad, pero solo escribo si pasó más de un minuto.
+  if (!u.ultimoLatido || inactivo > 60_000) {
+    await db.usuario.update({ where: { id: s.id }, data: { ultimoLatido: new Date() } }).catch(() => {});
+  }
 
   return s;
 }

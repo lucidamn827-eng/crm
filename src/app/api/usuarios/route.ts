@@ -51,3 +51,47 @@ export async function PATCH(req: Request) {
     return Response.json({ ok: true, codigoTg: u.codigoTg });
   } catch (e) { return e as Response; }
 }
+
+/**
+ * Eliminar un usuario. Solo se permite si no dejó rastro operativo:
+ * si ya cargó datos o hizo llamadas, se desactiva en vez de borrarse,
+ * porque borrarlo se llevaría puesto el historial de esas fichas.
+ */
+export async function DELETE(req: Request) {
+  try {
+    const s = await exigir("ADMIN");
+    const { id } = await req.json();
+    if (id === s.id) return Response.json({ error: "No podés eliminar tu propio usuario." }, { status: 400 });
+
+    const u = await db.usuario.findUnique({
+      where: { id },
+      select: {
+        usuario: true, nombre: true, rol: true,
+        _count: { select: { llamadas: true, leadsCargados: true, leadsAsignados: true } },
+      },
+    });
+    if (!u) return Response.json({ error: "Ese usuario no existe." }, { status: 404 });
+
+    const { llamadas, leadsCargados, leadsAsignados } = u._count;
+    if (llamadas || leadsCargados || leadsAsignados) {
+      return Response.json({
+        error: `No se puede eliminar: tiene ${llamadas} llamada(s), ${leadsCargados} contacto(s) cargados y ${leadsAsignados} asignado(s). Desactivalo para que no pueda entrar; su historial se conserva.`,
+      }, { status: 409 });
+    }
+
+    // Los avisos, suscripciones y eventos son bitácora de esa persona:
+    // sin llamadas ni contactos detrás, se van con ella. Todo en una transacción
+    // para que no quede a medio borrar si algo falla.
+    await db.$transaction([
+      db.aviso.deleteMany({ where: { usuarioId: id } }),
+      db.suscripcion.deleteMany({ where: { usuarioId: id } }),
+      db.evento.deleteMany({ where: { usuarioId: id } }),
+      db.usuario.delete({ where: { id } }),
+    ]);
+    await auditar(s, "Usuario eliminado", `${u.usuario} (${u.rol})`);
+    return Response.json({ ok: true });
+  } catch (e) {
+    if (e instanceof Response) return e;
+    return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
+  }
+}

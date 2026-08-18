@@ -38,9 +38,9 @@ function useTicker(activo: boolean) {
 
 export default function Panel({ sesion }: { sesion: Sesion }) {
   const pestanas: [string, string][] =
-    sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"]] :
-    sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"]] :
-    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"]];
+    sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
+    sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
+    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
 
   const marca =
     sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#14532D" } :
@@ -49,6 +49,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 
   const [vista, setVista] = useState(pestanas[0][0]);
   const [avisosOk, setAvisosOk] = useState(sesion.rol !== "CALLER");
+  const [saludo, setSaludo] = useState<any>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const router = useRouter();
@@ -57,6 +58,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     const r = await fetch("/api/leads");
     // 409 = alguien entró con esta misma cuenta en otro dispositivo.
     if (r.status === 409) return router.push("/?m=desplazada");
+    if (r.status === 440) return router.push("/?m=inactividad");
     if (r.status === 401) return router.push("/?m=vencida");
     if (r.ok) setLeads((await r.json()).leads ?? []);
     if (sesion.rol !== "CALLER") {
@@ -71,14 +73,47 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     return () => clearInterval(t);
   }, [cargar, sesion.rol]);
 
+  // Al entrar, le recordamos en qué puesto está: lo primero que ve al abrir la app.
+  useEffect(() => {
+    if (sesion.rol === "ADMIN") return;
+    if (!new URLSearchParams(window.location.search).has("bienvenida")) return;
+    window.history.replaceState({}, "", "/panel"); // que no reaparezca al recargar
+
+    fetch("/api/ranking").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (!d) return;
+      const tabla = sesion.rol === "CALLER" ? d.callers : d.spamers;
+      const conPuntos = (tabla ?? []).filter((x: any) => x.puntos > 0);
+      const i = conPuntos.findIndex((x: any) => x.id === sesion.id);
+      const yo = conPuntos[i];
+      const primero = conPuntos[0];
+      const vigente = sesion.rol === "CALLER" ? d.bonoVigente?.caller : d.bonoVigente?.spamer;
+      setSaludo({
+        puesto: i >= 0 ? i + 1 : null,
+        puntos: yo?.puntos ?? 0,
+        total: conPuntos.length,
+        faltan: primero && i > 0 ? primero.puntos - yo.puntos + 1 : 0,
+        lider: primero,
+        tengoBono: vigente?.id === sesion.id,
+        unidad: sesion.rol === "CALLER" ? "clientes que aceptaron" : "contactos subidos",
+      });
+    });
+  }, [sesion]);
+
   // Latido: deja constancia de quién está realmente con el panel abierto.
   useEffect(() => {
     const latir = () => fetch("/api/latido", { method: "POST" })
-      .then((r) => { if (r.status === 409) router.push("/?m=desplazada"); })
+      .then((r) => {
+        if (r.status === 409) router.push("/?m=desplazada");
+        if (r.status === 440) router.push("/?m=inactividad");
+      })
       .catch(() => {});
     latir();
     const t = setInterval(latir, 60000);
-    return () => clearInterval(t);
+    // Al volver a la app desde otra pestaña o tras desbloquear el teléfono,
+    // latimos enseguida: los navegadores frenan los temporizadores en segundo plano.
+    const alVolver = () => { if (document.visibilityState === "visible") latir(); };
+    document.addEventListener("visibilitychange", alVolver);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", alVolver); };
   }, [router]);
 
   return (
@@ -98,6 +133,50 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         </nav>
       </header>
       <main>
+        {saludo && (
+          <div className="velo" onClick={() => setSaludo(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ textAlign: "center", maxWidth: 460 }}>
+              <span className="rotulo">Ranking de esta semana</span>
+              {saludo.puesto ? (
+                <>
+                  <div style={{ fontSize: 64, lineHeight: 1, margin: "6px 0" }}>
+                    {saludo.puesto === 1 ? "🥇" : saludo.puesto === 2 ? "🥈" : saludo.puesto === 3 ? "🥉" : "📊"}
+                  </div>
+                  <h2>Vas {saludo.puesto}° de {saludo.total}</h2>
+                  <p className="sub" style={{ fontSize: 15 }}>
+                    Llevás <b className="mono">{saludo.puntos}</b> {saludo.unidad}.
+                  </p>
+                  {saludo.puesto === 1 ? (
+                    <div className="tip" style={{ background: "#EAF6F1", borderLeftColor: "var(--acepto)", color: "#136245", textAlign: "left" }}>
+                      <b>Estás 1°.</b> Si la semana cierra así, la próxima cobrás al <b>12%</b>.
+                      {saludo.tengoBono && " Y mantenés el bono que ya tenías."}
+                    </div>
+                  ) : (
+                    <div className="tip" style={{ textAlign: "left" }}>
+                      Te faltan <b>{saludo.faltan}</b> para pasar a {saludo.lider?.nombre} y quedarte con el <b>12%</b> de la semana que viene.
+                      {saludo.tengoBono && <> <b>Ojo:</b> hoy cobrás al 12% y lo perdés si la semana cierra así.</>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 64, lineHeight: 1, margin: "6px 0" }}>🚀</div>
+                  <h2>Arrancá la semana</h2>
+                  <p className="sub" style={{ fontSize: 15 }}>
+                    Todavía no sumaste nada. {saludo.lider ? `${saludo.lider.nombre} va adelante con ${saludo.lider.puntos}.` : "La tabla está en cero: el primero que sume, lidera."}
+                  </p>
+                  <div className="tip" style={{ textAlign: "left" }}>Quien termine 1° el domingo cobra al <b>12%</b> toda la semana siguiente.</div>
+                </>
+              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                <button className="btn" style={{ flex: 1 }} onClick={() => { setVista("ranking"); setSaludo(null); }}>
+                  Ver ranking
+                </button>
+                <button className="btn sec" style={{ flex: 1 }} onClick={() => setSaludo(null)}>A trabajar</button>
+              </div>
+            </div>
+          </div>
+        )}
         <Avisador bloqueante={sesion.rol === "CALLER"} onListo={setAvisosOk} />
         {vista === "cola" && (avisosOk
           ? <Cola leads={leads} recargar={cargar} />
@@ -110,6 +189,8 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         {vista === "monitor" && <Monitor leads={leads} usuarios={usuarios} recargar={cargar} />}
         {vista === "usuarios" && <Usuarios usuarios={usuarios} recargar={cargar} />}
         {vista === "avisos" && <Avisos />}
+        {vista === "ranking" && <Ranking sesion={sesion} />}
+        {vista === "cielo" && <Cielo sesion={sesion} />}
       </main>
     </>
   );
@@ -331,8 +412,7 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
 function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => void }) {
   const vacio = { nombre: "", dni: "", telefono: "", nota: "", asignadoA: "" };
   const [f, setF] = useState(vacio);
-  const [masivo, setMasivo] = useState(""), [msg, setMsg] = useState<any>(null);
-  const [destinoMasivo, setDestinoMasivo] = useState("");
+  const [msg, setMsg] = useState<any>(null);
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
   const num = (t: string) => t.replace(/\D/g, "");
   const faltan = !f.nombre.trim() || num(f.dni).length < 6 || num(f.telefono).length < 6 || !f.asignadoA;
@@ -383,22 +463,6 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         </button>
       </div>
 
-      <div className="tarjeta">
-        <h2>Carga masiva</h2>
-        <p className="sub">Una línea por persona: <span className="mono">nombre, DNI, teléfono, nota</span></p>
-        <label>Caller que recibe toda esta lista <b style={{ color: "var(--noquiso)" }}>*</b></label>
-        <select value={destinoMasivo} onChange={(e) => setDestinoMasivo(e.target.value)}>
-          <option value="">Elegí el caller…</option>
-          {callers.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-        </select>
-        <textarea className="mono" style={{ minHeight: 120 }} value={masivo} onChange={(e) => setMasivo(e.target.value)}
-                  placeholder="Carla Méndez, 45868665, 987654321, pidió info" />
-        <button className="btn sec" style={{ marginTop: 12 }} disabled={!destinoMasivo || !masivo.trim()} onClick={() => {
-          const contactos = masivo.split("\n").map((l) => l.split(/[,;\t]/).map((t) => t.trim())).filter((p) => p[0])
-            .map(([nombre, dni, telefono, ...resto]) => ({ nombre, dni, telefono, nota: resto.join(", "), asignadoA: destinoMasivo }));
-          enviar({ contactos }); setMasivo("");
-        }}>{destinoMasivo ? "Cargar la lista" : "Elegí el caller primero"}</button>
-      </div>
     </>
   );
 }
@@ -523,6 +587,17 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
     recargar();
   }
 
+  async function eliminar(u: Usuario) {
+    if (!confirm(`¿Eliminar definitivamente a ${u.nombre} (${u.usuario})? Esta acción no se puede deshacer.`)) return;
+    const r = await fetch("/api/usuarios", {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id }),
+    });
+    const d = await r.json();
+    if (!r.ok) return setMsg(d.error);
+    setMsg(`${u.nombre} fue eliminado.`);
+    recargar();
+  }
+
   return (
     <>
       <div className="tarjeta">
@@ -540,13 +615,14 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
             </select>
           </div>
         </div>
-        {msg && <div className={msg === "Usuario creado." ? "ok" : "error"}>{msg}</div>}
+        {msg && <div className={msg.includes("creado") || msg.includes("eliminado") ? "ok" : "error"}>{msg}</div>}
         <button className="btn" style={{ marginTop: 14 }} onClick={crear}>Crear usuario</button>
       </div>
       <div className="tarjeta">
         <h2>Equipo</h2>
+        <p className="sub">“Eliminar” solo funciona con usuarios que nunca cargaron datos ni hicieron llamadas. Si ya trabajaron, usá “Desactivar”: no pueden entrar más, pero su historial se conserva.</p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Avisos</th><th>Estado</th><th>Contraseña</th><th /></tr>
+          <tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Avisos</th><th>Estado</th><th>Contraseña</th><th /><th /></tr>
           {usuarios.map((u) => (
             <tr key={u.id}>
               <td><b>{u.nombre}</b></td>
@@ -559,6 +635,9 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
                 if (clave) editar(u.id, { clave });
               }}>Cambiar</button></td>
               <td><button className="btn sec chico" onClick={() => editar(u.id, { activo: !u.activo })}>{u.activo ? "Desactivar" : "Reactivar"}</button></td>
+              <td>
+                <button className="btn chico" style={{ background: "var(--noquiso)" }} onClick={() => eliminar(u)}>Eliminar</button>
+              </td>
             </tr>
           ))}
         </tbody></table></div>
@@ -783,5 +862,324 @@ function Supervision() {
         </div>
       )}
     </>
+  );
+}
+
+
+/* ============ PODIO SEMANAL ============ */
+function Ranking({ sesion }: { sesion: Sesion }) {
+  const [d, setD] = useState<any>(null);
+  useEffect(() => { fetch("/api/ranking").then((r) => (r.ok ? r.json() : null)).then(setD); }, []);
+  if (!d) return <div className="tarjeta">Cargando el podio…</div>;
+
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString("es", { day: "2-digit", month: "2-digit" });
+  const restan = () => {
+    const ms = new Date(d.cierre).getTime() - Date.now();
+    const dias = Math.floor(ms / 86400000), horas = Math.floor((ms % 86400000) / 3600000);
+    return dias > 0 ? `${dias} día(s) y ${horas} h` : `${horas} h`;
+  };
+
+  return (
+    <>
+      <div className="tarjeta" style={{ textAlign: "center" }}>
+        <h2>Ranking de la semana</h2>
+        <p className="sub">
+          Del lunes {fmt(d.desde)} al domingo · cierra en {restan()}
+        </p>
+      </div>
+
+      {(sesion.rol === "CALLER" || sesion.rol === "ADMIN") && (
+        <>
+          <Podio titulo="Callers · más clientes que aceptaron" unidad="aceptaron"
+                 gente={d.callers} yo={sesion.id} />
+          <Premio vigente={d.bonoVigente?.caller} lider={d.callers?.[0]} yo={sesion.id} quien="caller" />
+        </>
+      )}
+      {(sesion.rol === "CARGADOR" || sesion.rol === "ADMIN") && (
+        <>
+          <Podio titulo="Spamers · más data subida" unidad="contactos"
+                 gente={d.spamers} yo={sesion.id} />
+          <Premio vigente={d.bonoVigente?.spamer} lider={d.spamers?.[0]} yo={sesion.id} quien="spamer" />
+        </>
+      )}
+    </>
+  );
+}
+
+function Podio({ titulo, unidad, gente, yo }: { titulo: string; unidad: string; gente: any[]; yo: string }) {
+  const conPuntos = gente.filter((g) => g.puntos > 0);
+  const top = conPuntos.slice(0, 3);
+  const resto = conPuntos.slice(3);
+  const maximo = top[0]?.puntos || 1;
+  // El podio se ve como un podio: 2° a la izquierda, 1° al centro, 3° a la derecha.
+  const orden = [top[1], top[0], top[2]];
+  const alturas = [92, 132, 68];
+  const medallas = ["🥈", "🥇", "🥉"];
+  const colores = ["#9AA5A0", "var(--lima-acento)", "#B08150"];
+
+  return (
+    <div className="tarjeta">
+      <h2>{titulo}</h2>
+      {!conPuntos.length ? (
+        <p className="sub">Todavía nadie sumó esta semana. El lunes arranca de cero para todos.</p>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 10, marginTop: 22 }}>
+            {orden.map((p, i) => !p ? <div key={i} style={{ flex: 1, maxWidth: 150 }} /> : (
+              <div key={p.id} style={{ flex: 1, maxWidth: 150, textAlign: "center" }}>
+                <div style={{ fontSize: i === 1 ? 34 : 26 }}>{medallas[i]}</div>
+                <div style={{ fontWeight: 700, fontSize: i === 1 ? 16 : 14, marginTop: 2 }}>
+                  {p.nombre}{p.id === yo && " (vos)"}
+                </div>
+                <div className="mono" style={{ fontSize: i === 1 ? 26 : 20, fontWeight: 600, lineHeight: 1.2 }}>{p.puntos}</div>
+                <div className="rotulo">{unidad}</div>
+                <div style={{
+                  height: alturas[i], marginTop: 8, borderRadius: "10px 10px 0 0",
+                  background: colores[i],
+                  border: p.id === yo ? "3px solid var(--tinta)" : "none",
+                  display: "grid", placeItems: "center",
+                  color: i === 1 ? "var(--lima-cascara)" : "#fff",
+                  fontFamily: '"IBM Plex Sans Condensed", sans-serif', fontWeight: 700, fontSize: 30,
+                }}>
+                  {i === 1 ? 1 : i === 0 ? 2 : 3}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {!!resto.length && (
+            <div style={{ marginTop: 18 }}>
+              <span className="rotulo">Resto de la tabla</span>
+              <div className="tabla-scroll"><table><tbody>
+                {resto.map((p, i) => (
+                  <tr key={p.id} style={p.id === yo ? { background: "var(--petroleo-cl)" } : undefined}>
+                    <td className="mono" style={{ width: 40 }}>{i + 4}°</td>
+                    <td><b>{p.nombre}</b>{p.id === yo && " (vos)"}</td>
+                    <td style={{ width: "50%" }}>
+                      <div className="barra"><span style={{ width: `${(p.puntos / maximo) * 100}%` }} /></div>
+                    </td>
+                    <td className="mono" style={{ width: 60, textAlign: "right", fontWeight: 600 }}>{p.puntos}</td>
+                  </tr>
+                ))}
+              </tbody></table></div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+
+/* ============ PREMIO DE LA SEMANA ============ */
+function Premio({ vigente, lider, yo, quien }:
+  { vigente: any; lider: any; yo: string; quien: "caller" | "spamer" }) {
+  const soyElVigente = vigente?.id === yo;
+  const voyPrimero = lider?.id === yo && lider?.puntos > 0;
+
+  return (
+    <div className="tarjeta" style={{ borderLeft: "6px solid var(--lima-acento)" }}>
+      <h2>💰 Premio del 1er puesto</h2>
+      <p className="sub">Cómo se gana el 2% adicional sobre tu pago.</p>
+
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 18,
+        margin: "18px 0", flexWrap: "wrap", textAlign: "center",
+      }}>
+        <div>
+          <div className="rotulo">Pago normal</div>
+          <div className="mono" style={{ fontSize: 30, fontWeight: 600, color: "var(--tinta2)" }}>10%</div>
+        </div>
+        <div style={{ fontSize: 26, color: "var(--tinta2)" }}>→</div>
+        <div>
+          <div className="rotulo">Si salís 1°</div>
+          <div className="mono" style={{ fontSize: 38, fontWeight: 700, color: "var(--acepto)" }}>12%</div>
+          <div className="sub">la semana siguiente</div>
+        </div>
+      </div>
+
+      <ol className="pasos" style={{ listStyle: "none", padding: 0 }}>
+        <li><span className="paso-n">1</span><div>Terminás la semana en el <b>1er puesto</b> de tu tabla.</div></li>
+        <li><span className="paso-n">2</span><div>La semana siguiente cobrás al <b>12%</b> en lugar del 10%.</div></li>
+        <li><span className="paso-n">3</span><div>Para <b>mantener el 12%</b> tenés que volver a salir 1° esa misma semana.</div></li>
+        <li><span className="paso-n">4</span><div>Si no lo lográs, volvés al 10% y el 12% pasa a quien haya ganado.</div></li>
+      </ol>
+
+      <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
+        <div className="tip" style={{ background: "#EAF6F1", borderLeftColor: "var(--acepto)", color: "#136245" }}>
+          <b>Cobrando al 12% esta semana:</b>{" "}
+          {vigente
+            ? <>{vigente.nombre}{soyElVigente && " — ¡sos vos!"} (ganó la semana pasada con {vigente.puntos})</>
+            : <>nadie todavía. El primero que gane una semana estrena el bono.</>}
+        </div>
+
+        <div className="tip">
+          <b>Va camino al 12% de la próxima semana:</b>{" "}
+          {lider?.puntos
+            ? <>{lider.nombre}{voyPrimero && " — ¡sos vos, no lo sueltes!"} con {lider.puntos}</>
+            : <>puesto libre: el primero que sume se lo lleva.</>}
+          {soyElVigente && !voyPrimero && <> Ojo: si la semana cierra así, perdés el 12% que tenés ahora.</>}
+        </div>
+      </div>
+
+      <p className="sub" style={{ marginTop: 14 }}>
+        La semana cierra el domingo a medianoche. El bono se aplica sobre tu pago de la semana siguiente y se
+        renueva solamente si repetís el 1er puesto.
+      </p>
+    </div>
+  );
+}
+
+
+/* ============ EL CIELO ES EL LÍMITE ============ */
+/* Metas semanales. El bono NO se acumula: se cobra el del escalón más alto alcanzado. */
+const METAS = {
+  CALLER: [
+    { meta: 30, bono: 50 },
+    { meta: 40, bono: 100 },
+    { meta: 50, bono: 150 },
+    { meta: 60, bono: 200 },
+    { meta: 70, bono: 400 },
+  ],
+  CARGADOR: [
+    { meta: 150, bono: 50 },
+    { meta: 200, bono: 100 },
+    { meta: 300, bono: 150 },
+    { meta: 450, bono: 250 },
+  ],
+};
+
+function Cielo({ sesion }: { sesion: Sesion }) {
+  const [d, setD] = useState<any>(null);
+  useEffect(() => { fetch("/api/ranking").then((r) => (r.ok ? r.json() : null)).then(setD); }, []);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  const mio = (rol: "CALLER" | "CARGADOR", id: string) => {
+    const tabla = rol === "CALLER" ? d.callers : d.spamers;
+    return (tabla ?? []).find((x: any) => x.id === id)?.puntos ?? 0;
+  };
+
+  if (sesion.rol === "ADMIN") {
+    return (
+      <>
+        <TablaCielo titulo="Callers · bono por aceptados" rol="CALLER" gente={d.callers ?? []} unidad="aceptados" />
+        <TablaCielo titulo="Spamers · bono por data subida" rol="CARGADOR" gente={d.spamers ?? []} unidad="subidos" />
+      </>
+    );
+  }
+
+  const rol = sesion.rol as "CALLER" | "CARGADOR";
+  return <Escalera rol={rol} puntos={mio(rol, sesion.id)} cierre={d.cierre} />;
+}
+
+function Escalera({ rol, puntos, cierre }: { rol: "CALLER" | "CARGADOR"; puntos: number; cierre: string }) {
+  const metas = METAS[rol];
+  const unidad = rol === "CALLER" ? "clientes que aceptaron" : "contactos subidos";
+  const logrados = metas.filter((m) => puntos >= m.meta);
+  const actual = logrados[logrados.length - 1] ?? null;
+  const siguiente = metas.find((m) => puntos < m.meta) ?? null;
+  const faltan = siguiente ? siguiente.meta - puntos : 0;
+  const restan = () => {
+    const ms = new Date(cierre).getTime() - Date.now();
+    const dias = Math.floor(ms / 86400000);
+    return dias > 0 ? `${dias} día(s)` : `${Math.max(0, Math.floor(ms / 3600000))} h`;
+  };
+
+  return (
+    <>
+      <div className="tarjeta" style={{ textAlign: "center" }}>
+        <h2>☁️ El cielo es el límite</h2>
+        <p className="sub">Bono semanal que se paga al cerrar la semana. Quedan {restan()}.</p>
+      </div>
+
+      <div className="cielo">
+        <span className="nube" style={{ width: 120, height: 34, top: 40, left: -20 }} />
+        <span className="nube" style={{ width: 90, height: 26, top: 160, right: -15 }} />
+        <span className="nube" style={{ width: 140, height: 40, bottom: 90, left: -30 }} />
+
+        {[...metas].reverse().map((m, i) => {
+          const logrado = puntos >= m.meta;
+          const esSiguiente = siguiente?.meta === m.meta;
+          return (
+            <div key={m.meta}>
+              <div className={`peldano ${logrado ? "logrado" : ""} ${esSiguiente ? "siguiente" : ""}`}>
+                <span style={{ fontSize: 24 }}>{logrado ? "✅" : esSiguiente ? "🎯" : "☁️"}</span>
+                <span className="meta">{m.meta}</span>
+                <span style={{ fontSize: 13, color: "var(--tinta2)" }}>{unidad}</span>
+                <span className="bono" style={{ color: logrado ? "var(--acepto)" : "var(--tinta)" }}>S/ {m.bono}</span>
+              </div>
+              {i < metas.length - 1 && <div className="escalon-linea" />}
+            </div>
+          );
+        })}
+
+        <div className="globo">
+          <span className="rotulo">Vas por</span>
+          <div className="mono" style={{ fontSize: 40, fontWeight: 700, lineHeight: 1.1 }}>{puntos}</div>
+          <div className="sub">{unidad} esta semana</div>
+
+          <div className="barra" style={{ marginTop: 12, height: 12 }}>
+            <span style={{ width: `${Math.min(100, siguiente ? (puntos / siguiente.meta) * 100 : 100)}%` }} />
+          </div>
+
+          {siguiente ? (
+            <p style={{ marginTop: 10, fontSize: 15 }}>
+              Te faltan <b className="mono">{faltan}</b> para llegar a <b>{siguiente.meta}</b> y cobrar{" "}
+              <b style={{ color: "var(--acepto)" }}>S/ {siguiente.bono}</b>
+            </p>
+          ) : (
+            <p style={{ marginTop: 10, fontSize: 15 }}>🚀 Llegaste al tope de la escalera. Nadie te alcanza.</p>
+          )}
+
+          <div className="tip" style={{ textAlign: "left", marginTop: 12 }}>
+            {actual
+              ? <>Con lo que llevás ya tenés asegurado un bono de <b>S/ {actual.bono}</b>. Si subís un escalón más, ese monto se reemplaza por el mayor.</>
+              : <>Todavía no llegaste al primer escalón ({metas[0].meta} {unidad}). Ahí arranca el bono de S/ {metas[0].bono}.</>}
+          </div>
+        </div>
+      </div>
+
+      <div className="tarjeta">
+        <h2>Cómo se cobra</h2>
+        <ol className="pasos" style={{ listStyle: "none", padding: 0 }}>
+          <li><span className="paso-n">1</span><div>Contás desde el <b>lunes</b> hasta el <b>domingo</b>. El lunes vuelve a cero.</div></li>
+          <li><span className="paso-n">2</span><div>El bono <b>no se suma</b>: cobrás únicamente el del escalón más alto que alcances.</div></li>
+          <li><span className="paso-n">3</span><div>Ejemplo: si llegás a {metas[metas.length - 2].meta}, cobrás S/ {metas[metas.length - 2].bono} — no la suma de los anteriores.</div></li>
+          <li><span className="paso-n">4</span><div>Se paga al terminar la semana, aparte del ranking y del 12%.</div></li>
+        </ol>
+      </div>
+    </>
+  );
+}
+
+function TablaCielo({ titulo, rol, gente, unidad }:
+  { titulo: string; rol: "CALLER" | "CARGADOR"; gente: any[]; unidad: string }) {
+  const metas = METAS[rol];
+  const bonoDe = (p: number) => [...metas].reverse().find((m) => p >= m.meta)?.bono ?? 0;
+  const proxima = (p: number) => metas.find((m) => p < m.meta);
+  const total = gente.reduce((n, g) => n + bonoDe(g.puntos), 0);
+
+  return (
+    <div className="tarjeta">
+      <h2>{titulo}</h2>
+      <p className="sub">Bono asegurado si la semana cerrara ahora mismo.</p>
+      <div className="tabla-scroll"><table><tbody>
+        <tr><th>Persona</th><th>{unidad}</th><th>Escalón alcanzado</th><th>Bono a pagar</th><th>Próxima meta</th></tr>
+        {gente.map((g) => {
+          const b = bonoDe(g.puntos), sig = proxima(g.puntos);
+          return (
+            <tr key={g.id}>
+              <td><b>{g.nombre}</b></td>
+              <td className="mono">{g.puntos}</td>
+              <td>{b ? `${[...metas].reverse().find((m) => g.puntos >= m.meta)!.meta} ${unidad}` : "—"}</td>
+              <td className="mono" style={{ fontWeight: 700, color: b ? "var(--acepto)" : "var(--tinta2)" }}>S/ {b}</td>
+              <td className="sub">{sig ? `le faltan ${sig.meta - g.puntos} para S/ ${sig.bono}` : "tope alcanzado"}</td>
+            </tr>
+          );
+        })}
+        {!gente.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Sin movimiento esta semana.</td></tr>}
+      </tbody></table></div>
+      <div className="tip"><b>Total a pagar si la semana cerrara hoy: S/ {total}</b> — el bono no se acumula, se paga solo el escalón más alto de cada uno.</div>
+    </div>
   );
 }
