@@ -75,6 +75,12 @@ model Llamada {
   caller    Usuario    @relation(fields: [callerId], references: [id])
   callerId  String
   resultado    EstadoLead
+  monto        Float?   // soles cobrados al cliente (obligatorio cuando aceptó)
+  referencia   String?  // nº de operación, voucher o comprobante
+  validada     Boolean  @default(false) // el admin confirmó que el dinero entró
+  anulada      Boolean  @default(false) // venta caída: no cuenta para comisión ni ranking
+  revisadoPor  String?
+  revisadoEn   DateTime?
   nota         String?
   duracion     Int      @default(0)  // segundos entre "voy a llamar" y el resultado
   abiertoEn    DateTime @default(now()) // cuándo confirmó que iba a llamar

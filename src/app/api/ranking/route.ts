@@ -27,19 +27,24 @@ export async function GET() {
 
     const [usuarios, llamadas, leads, llamadasPrev, leadsPrev] = await Promise.all([
       db.usuario.findMany({ where: { activo: true }, select: { id: true, nombre: true, rol: true } }),
-      db.llamada.findMany({ where: { creadoEn: { gte: desde }, resultado: "ACEPTO" }, select: { callerId: true } }),
+      db.llamada.findMany({ where: { creadoEn: { gte: desde }, resultado: "ACEPTO", anulada: false }, select: { callerId: true } }),
       db.lead.findMany({ where: { creadoEn: { gte: desde } }, select: { cargadoPorId: true, estado: true } }),
-      db.llamada.findMany({ where: { creadoEn: { gte: inicioAnterior, lt: desde }, resultado: "ACEPTO" }, select: { callerId: true } }),
+      db.llamada.findMany({ where: { creadoEn: { gte: inicioAnterior, lt: desde }, resultado: "ACEPTO", anulada: false }, select: { callerId: true } }),
       db.lead.findMany({ where: { creadoEn: { gte: inicioAnterior, lt: desde } }, select: { cargadoPorId: true } }),
     ]);
 
-    const ganador = (ids: string[], rol: string) => {
+    // Devuelve el 1° y el 2° de la semana pasada: son los que cobran el extra ahora.
+    const podio = (ids: string[], rol: string) => {
       const cuenta = new Map<string, number>();
       ids.forEach((id) => cuenta.set(id, (cuenta.get(id) ?? 0) + 1));
-      const mejor = [...cuenta.entries()].sort((a, b) => b[1] - a[1])[0];
-      if (!mejor) return null;
-      const u = usuarios.find((x) => x.id === mejor[0] && x.rol === rol);
-      return u ? { id: u.id, nombre: u.nombre, puntos: mejor[1] } : null;
+      return [...cuenta.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([id, puntos]) => {
+          const u = usuarios.find((x) => x.id === id && x.rol === rol);
+          return u ? { id: u.id, nombre: u.nombre, puntos } : null;
+        })
+        .filter(Boolean)
+        .slice(0, 2);
     };
 
     const callers = usuarios.filter((u) => u.rol === "CALLER").map((u) => ({
@@ -64,8 +69,8 @@ export async function GET() {
       // Quiénes ganaron la semana pasada: son los que cobran al 12% esta semana.
       bonoVigente: {
         desde: inicioAnterior,
-        caller: ganador(llamadasPrev.map((l) => l.callerId), "CALLER"),
-        spamer: ganador(leadsPrev.map((l) => l.cargadoPorId), "CARGADOR"),
+        caller: podio(llamadasPrev.map((l) => l.callerId), "CALLER"),
+        spamer: podio(leadsPrev.map((l) => l.cargadoPorId), "CARGADOR"),
       },
     });
   } catch (e) {

@@ -38,9 +38,9 @@ function useTicker(activo: boolean) {
 
 export default function Panel({ sesion }: { sesion: Sesion }) {
   const pestanas: [string, string][] =
-    sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
+    sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
     sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
-    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
+    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
 
   const marca =
     sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#14532D" } :
@@ -86,14 +86,14 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
       const i = conPuntos.findIndex((x: any) => x.id === sesion.id);
       const yo = conPuntos[i];
       const primero = conPuntos[0];
-      const vigente = sesion.rol === "CALLER" ? d.bonoVigente?.caller : d.bonoVigente?.spamer;
+      const vigentes = sesion.rol === "CALLER" ? d.bonoVigente?.caller : d.bonoVigente?.spamer;
       setSaludo({
         puesto: i >= 0 ? i + 1 : null,
         puntos: yo?.puntos ?? 0,
         total: conPuntos.length,
         faltan: primero && i > 0 ? primero.puntos - yo.puntos + 1 : 0,
         lider: primero,
-        tengoBono: vigente?.id === sesion.id,
+        tengoBono: vigentes?.[0]?.id === sesion.id,
         unidad: sesion.rol === "CALLER" ? "clientes que aceptaron" : "contactos subidos",
       });
     });
@@ -191,6 +191,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         {vista === "avisos" && <Avisos />}
         {vista === "ranking" && <Ranking sesion={sesion} />}
         {vista === "cielo" && <Cielo sesion={sesion} />}
+        {vista === "liquidacion" && <Liquidacion sesion={sesion} />}
       </main>
     </>
   );
@@ -200,6 +201,8 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
   const [porConfirmar, setPorConfirmar] = useState<Lead | null>(null);
   const [nota, setNota] = useState(""), [msg, setMsg] = useState("");
+  const [cobro, setCobro] = useState<{ monto: string; referencia: string } | null>(null);
+  const [festejo, setFestejo] = useState<any>(null);
   const enCurso = leads.find((l) => l.enLlamadaDesde);
   useTicker(!!enCurso);
 
@@ -211,12 +214,20 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
     recargar();
   }
 
-  async function registrar(id: number, resultado: string) {
+  async function registrar(id: number, resultado: string, extra: any = {}) {
     const r = await fetch(`/api/leads/${id}/resultado`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resultado, nota, duracion: desde(enCurso?.enLlamadaDesde) }),
+      body: JSON.stringify({ resultado, nota, ...extra }),
     });
-    setMsg(r.ok ? `Registrado: ${eti(resultado).txt}` : "No se pudo registrar.");
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return setMsg(d.error ?? "No se pudo registrar.");
+
+    if (resultado === "ACEPTO") {
+      setFestejo({ monto: Number(extra.monto), comision: Number(extra.monto) * 0.1, escalon: d.subioEscalon });
+      setCobro(null);
+    } else {
+      setMsg(`Registrado: ${eti(resultado).txt}`);
+    }
     setNota(""); recargar();
   }
 
@@ -242,6 +253,64 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
         </div>
       )}
 
+      {cobro && enCurso && (
+        <div className="velo">
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <span className="rotulo">Cerrando la venta</span>
+            <h2>¿Cuánto pagó el cliente?</h2>
+            <p className="sub">{enCurso.nombre} · DNI {enCurso.dni}</p>
+            <label htmlFor="mto">Monto cobrado en soles *</label>
+            <input id="mto" className="mono" inputMode="decimal" autoFocus
+                   style={{ fontSize: 26, fontWeight: 700, textAlign: "center" }}
+                   placeholder="0.00" value={cobro.monto}
+                   onChange={(e) => setCobro({ ...cobro, monto: e.target.value.replace(/[^\d.]/g, "") })} />
+            {!!Number(cobro.monto) && (
+              <p className="sub" style={{ textAlign: "center", marginTop: 6 }}>
+                Tu comisión: <b className="mono" style={{ color: "var(--acepto)", fontSize: 17 }}>
+                  S/ {(Number(cobro.monto) * 0.1).toFixed(2)}
+                </b>
+              </p>
+            )}
+            <label htmlFor="ref">N° de operación o voucher (opcional)</label>
+            <input id="ref" className="mono" placeholder="Ej: 0098234" value={cobro.referencia}
+                   onChange={(e) => setCobro({ ...cobro, referencia: e.target.value })} />
+            <div className="tip">Sin monto no se puede cerrar como “Aceptó”. Tu supervisor revisa y valida cada venta.</div>
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button className="btn" style={{ flex: 1 }} disabled={!(Number(cobro.monto) > 0)}
+                      onClick={() => registrar(enCurso.id, "ACEPTO", { monto: Number(cobro.monto), referencia: cobro.referencia })}>
+                Confirmar venta
+              </button>
+              <button className="btn sec" onClick={() => setCobro(null)}>Volver</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {festejo && (
+        <div className="velo" onClick={() => setFestejo(null)}>
+          <div className="modal" style={{ maxWidth: 420, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 62, lineHeight: 1 }}>{festejo.escalon ? "☁️" : "🎉"}</div>
+            <h2>{festejo.escalon ? "¡Subiste de escalón!" : "¡Venta cerrada!"}</h2>
+            <p className="sub" style={{ fontSize: 15 }}>Cobraste S/ {festejo.monto.toFixed(2)} al cliente.</p>
+            <div style={{ margin: "14px 0" }}>
+              <span className="rotulo">Tu comisión</span>
+              <div className="mono" style={{ fontSize: 40, fontWeight: 700, color: "var(--acepto)", lineHeight: 1.1 }}>
+                S/ {festejo.comision.toFixed(2)}
+              </div>
+            </div>
+            {festejo.escalon && (
+              <div className="tip" style={{ background: "#EAF6F1", borderLeftColor: "var(--acepto)", color: "#136245" }}>
+                Llegaste a <b>{festejo.escalon.total}</b> aceptados: tenés asegurado un bono de{" "}
+                <b>S/ {festejo.escalon.bono}</b> esta semana.
+              </div>
+            )}
+            <button className="btn" style={{ width: "100%", marginTop: 14 }} onClick={() => setFestejo(null)}>
+              Seguir llamando
+            </button>
+          </div>
+        </div>
+      )}
+
       {enCurso ? (
         <div className="tarjeta">
           <div className="ficha-cab">
@@ -261,7 +330,7 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
           <label>Nota de la llamada</label>
           <textarea value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: pidió que lo llamen después de las 18 h" />
           <div className="resultados">
-            <button className="res a" onClick={() => registrar(enCurso.id, "ACEPTO")}>Aceptó</button>
+            <button className="res a" onClick={() => setCobro({ monto: "", referencia: "" })}>Aceptó</button>
             <button className="res n" onClick={() => registrar(enCurso.id, "NO_CONTESTO")}>No contestó</button>
             <button className="res x" onClick={() => registrar(enCurso.id, "NO_QUISO")}>No quiso</button>
             <button className="res v" onClick={() => registrar(enCurso.id, "VOLVER_A_LLAMAR")}>Volver a llamar</button>
@@ -892,14 +961,14 @@ function Ranking({ sesion }: { sesion: Sesion }) {
         <>
           <Podio titulo="Callers · más clientes que aceptaron" unidad="aceptaron"
                  gente={d.callers} yo={sesion.id} />
-          <Premio vigente={d.bonoVigente?.caller} lider={d.callers?.[0]} yo={sesion.id} quien="caller" />
+          <Premio vigentes={d.bonoVigente?.caller} tabla={d.callers} yo={sesion.id} />
         </>
       )}
       {(sesion.rol === "CARGADOR" || sesion.rol === "ADMIN") && (
         <>
           <Podio titulo="Spamers · más data subida" unidad="contactos"
                  gente={d.spamers} yo={sesion.id} />
-          <Premio vigente={d.bonoVigente?.spamer} lider={d.spamers?.[0]} yo={sesion.id} quien="spamer" />
+          <Premio vigentes={d.bonoVigente?.spamer} tabla={d.spamers} yo={sesion.id} />
         </>
       )}
     </>
@@ -972,10 +1041,14 @@ function Podio({ titulo, unidad, gente, yo }: { titulo: string; unidad: string; 
 
 
 /* ============ PREMIO DE LA SEMANA ============ */
-function Premio({ vigente, lider, yo, quien }:
-  { vigente: any; lider: any; yo: string; quien: "caller" | "spamer" }) {
+function Premio({ vigentes, tabla, yo }: { vigentes: any[]; tabla: any[]; yo: string }) {
+  const conPuntos = (tabla ?? []).filter((x: any) => x.puntos > 0);
+  const lider = conPuntos[0];
+  const vigente = vigentes?.[0];             // ganó la semana pasada: cobra 12% ahora
   const soyElVigente = vigente?.id === yo;
   const voyPrimero = lider?.id === yo && lider?.puntos > 0;
+  const yoAhora = conPuntos.find((x: any) => x.id === yo);
+  const faltan = lider && yoAhora && !voyPrimero ? lider.puntos - yoAhora.puntos + 1 : lider ? lider.puntos + 1 : 1;
 
   return (
     <div className="tarjeta" style={{ borderLeft: "6px solid var(--lima-acento)" }}>
@@ -1018,18 +1091,17 @@ function Premio({ vigente, lider, yo, quien }:
           {lider?.puntos
             ? <>{lider.nombre}{voyPrimero && " — ¡sos vos, no lo sueltes!"} con {lider.puntos}</>
             : <>puesto libre: el primero que sume se lo lleva.</>}
-          {soyElVigente && !voyPrimero && <> Ojo: si la semana cierra así, perdés el 12% que tenés ahora.</>}
+          {!voyPrimero && lider?.puntos && <> Te faltan <b>{faltan}</b> para pasarlo.</>}
+          {soyElVigente && !voyPrimero && <> <b>Ojo:</b> si la semana cierra así, perdés el 12% que tenés ahora.</>}
         </div>
       </div>
 
       <p className="sub" style={{ marginTop: 14 }}>
-        La semana cierra el domingo a medianoche. El bono se aplica sobre tu pago de la semana siguiente y se
-        renueva solamente si repetís el 1er puesto.
+        La semana cierra el domingo a medianoche. Este porcentaje es aparte del bono de “El cielo es el límite”.
       </p>
     </div>
   );
 }
-
 
 /* ============ EL CIELO ES EL LÍMITE ============ */
 /* Metas semanales. El bono NO se acumula: se cobra el del escalón más alto alcanzado. */
@@ -1181,5 +1253,153 @@ function TablaCielo({ titulo, rol, gente, unidad }:
       </tbody></table></div>
       <div className="tip"><b>Total a pagar si la semana cerrara hoy: S/ {total}</b> — el bono no se acumula, se paga solo el escalón más alto de cada uno.</div>
     </div>
+  );
+}
+
+
+/* ============ LIQUIDACIÓN ============ */
+const soles = (n: number) => `S/ ${(n ?? 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function Liquidacion({ sesion }: { sesion: Sesion }) {
+  const [d, setD] = useState<any>(null);
+  const admin = sesion.rol === "ADMIN";
+  const traer = useCallback(() => {
+    fetch(`/api/liquidacion${admin ? "?todos=1" : ""}`).then((r) => (r.ok ? r.json() : null)).then(setD);
+  }, [admin]);
+  useEffect(() => { traer(); }, [traer]);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  async function revisar(id: number, cambios: any) {
+    await fetch("/api/liquidacion", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...cambios }),
+    });
+    traer();
+  }
+
+  if (admin) {
+    return (
+      <>
+        <div className="grid4">
+          <div className="metrica"><span className="rotulo">Vendido esta semana</span><b style={{ fontSize: 22 }}>{soles(d.totales.vendido)}</b></div>
+          <div className="metrica"><span className="rotulo">Ventas cerradas</span><b>{d.totales.ventas}</b></div>
+          <div className="metrica"><span className="rotulo">Comisiones</span><b style={{ fontSize: 22 }}>{soles(d.totales.comision)}</b></div>
+          <div className="metrica"><span className="rotulo">Total a pagar</span><b style={{ fontSize: 22, color: "var(--noquiso)" }}>{soles(d.totales.aPagar)}</b></div>
+        </div>
+
+        <div className="tarjeta">
+          <h2>Por caller</h2>
+          <p className="sub">Comisión + bono de escalón. El total a pagar incluye los S/ {d.totales.bonos} de bonos.</p>
+          <div className="tabla-scroll"><table><tbody>
+            <tr><th>Caller</th><th>Ventas</th><th>Vendido</th><th>Ticket promedio</th><th>Tasa</th><th>Comisión</th><th>Bono</th><th>Total</th><th>Sin validar</th></tr>
+            {d.filas.map((f: any) => (
+              <tr key={f.id}>
+                <td><b>{f.nombre}</b></td>
+                <td className="mono">{f.ventas}{f.anuladas > 0 && <span style={{ color: "var(--noquiso)" }}> (−{f.anuladas})</span>}</td>
+                <td className="mono">{soles(f.vendido)}</td>
+                <td className="mono">{soles(f.ticket)}</td>
+                <td className="mono">{Math.round(f.tasa * 100)}%</td>
+                <td className="mono">{soles(f.comision)}</td>
+                <td className="mono">{f.bono ? soles(f.bono) : "—"}</td>
+                <td className="mono" style={{ fontWeight: 700 }}>{soles(f.total)}</td>
+                <td className="mono" style={{ color: f.pendientesValidar ? "var(--nocontesto)" : undefined }}>{f.pendientesValidar}</td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        </div>
+
+        <div className="tarjeta">
+          <h2>Ventas de la semana</h2>
+          <p className="sub">Validá las que confirmaste que entraron y anulá las que se cayeron. Una venta anulada no paga comisión ni suma al ranking.</p>
+          <div className="tabla-scroll"><table><tbody>
+            <tr><th>Fecha</th><th>Caller</th><th>Cliente</th><th>Monto</th><th>Referencia</th><th>Estado</th><th /></tr>
+            {d.ventas.map((v: any) => (
+              <tr key={v.id} style={v.anulada ? { opacity: .55 } : undefined}>
+                <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                <td>{v.caller}</td>
+                <td>{v.lead?.nombre}<br /><span className="mono sub">{v.lead?.dni}</span></td>
+                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto ?? 0)}</td>
+                <td className="mono">{v.referencia ?? "—"}</td>
+                <td>
+                  {v.anulada
+                    ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>Anulada</span>
+                    : v.validada
+                      ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>Validada</span>
+                      : <span className="eti" style={{ color: "var(--nocontesto)", borderColor: "var(--nocontesto)" }}>Sin revisar</span>}
+                </td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  {!v.validada && !v.anulada && <button className="btn chico" onClick={() => revisar(v.id, { validada: true })}>Validar</button>}
+                  {!v.anulada
+                    ? <button className="btn chico sec" onClick={() => confirm("¿Anular esta venta? No paga comisión ni cuenta para el ranking.") && revisar(v.id, { anulada: true, validada: false })}>Anular</button>
+                    : <button className="btn chico sec" onClick={() => revisar(v.id, { anulada: false })}>Restaurar</button>}
+                  <button className="btn chico sec" onClick={() => {
+                    const m = prompt("Corregir el monto en soles:", String(v.monto ?? 0));
+                    if (m !== null && Number(m) > 0) revisar(v.id, { monto: Number(m) });
+                  }}>Monto</button>
+                </td>
+              </tr>
+            ))}
+            {!d.ventas.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Sin ventas esta semana.</td></tr>}
+          </tbody></table></div>
+        </div>
+      </>
+    );
+  }
+
+  const m = d.mio;
+  return (
+    <>
+      <div className="tarjeta" style={{ textAlign: "center", background: "linear-gradient(180deg,#14532D,#1B6B3A)", color: "#EAF4F6", border: 0 }}>
+        <span className="rotulo" style={{ color: "#9FC9D2" }}>Llevás ganado esta semana</span>
+        <div className="mono" style={{ fontSize: 52, fontWeight: 700, lineHeight: 1.1, margin: "4px 0" }}>{soles(m.total)}</div>
+        <p style={{ opacity: .85, fontSize: 14 }}>
+          {soles(m.comision)} de comisión{m.bono > 0 && <> + {soles(m.bono)} de bono</>}
+        </p>
+      </div>
+
+      <div className="grid4">
+        <div className="metrica"><span className="rotulo">Ventas</span><b>{m.ventas}</b></div>
+        <div className="metrica"><span className="rotulo">Vendido</span><b style={{ fontSize: 21 }}>{soles(m.vendido)}</b></div>
+        <div className="metrica"><span className="rotulo">Tu tasa</span><b>{Math.round(m.tasa * 100)}%</b></div>
+        <div className="metrica"><span className="rotulo">Venta promedio</span><b style={{ fontSize: 21 }}>{soles(m.ticket)}</b></div>
+      </div>
+
+      {m.siguiente && (
+        <div className="tarjeta">
+          <b>Te faltan {m.siguiente.meta - m.ventas} ventas para el bono de S/ {m.siguiente.bono}</b>
+          <div className="barra" style={{ marginTop: 10, height: 12 }}>
+            <span style={{ width: `${Math.min(100, (m.ventas / m.siguiente.meta) * 100)}%` }} />
+          </div>
+          <p className="sub" style={{ marginTop: 8 }}>
+            {m.tasa > 0.1
+              ? "Estás cobrando al 12% por haber salido 1° la semana pasada."
+              : "Si salís 1° en el ranking, la próxima semana cobrás al 12%."}
+          </p>
+        </div>
+      )}
+
+      <div className="tarjeta">
+        <h2>Mis ventas de la semana</h2>
+        <p className="sub">Tu supervisor valida cada una. Si se cae una venta, se anula y deja de contar.</p>
+        <div className="tabla-scroll"><table><tbody>
+          <tr><th>Fecha</th><th>Cliente</th><th>Monto</th><th>Tu comisión</th><th>Estado</th></tr>
+          {d.detalle.map((v: any) => (
+            <tr key={v.id} style={v.anulada ? { opacity: .55 } : undefined}>
+              <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+              <td>{v.lead?.nombre}</td>
+              <td className="mono">{soles(v.monto ?? 0)}</td>
+              <td className="mono" style={{ color: "var(--acepto)", fontWeight: 600 }}>{soles((v.monto ?? 0) * m.tasa)}</td>
+              <td>
+                {v.anulada
+                  ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>Anulada</span>
+                  : v.validada
+                    ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>Validada</span>
+                    : <span className="eti" style={{ color: "var(--nocontesto)", borderColor: "var(--nocontesto)" }}>En revisión</span>}
+              </td>
+            </tr>
+          ))}
+          {!d.detalle.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Todavía no cerraste ventas esta semana.</td></tr>}
+        </tbody></table></div>
+      </div>
+    </>
   );
 }
