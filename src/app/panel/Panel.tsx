@@ -9,7 +9,7 @@ import type { Rol } from "@/lib/auth";
 type Sesion = { id: string; usuario: string; nombre: string; rol: Rol };
 type Lead = {
   id: number; nombre: string; dni: string; telefono: string; nota?: string | null;
-  estado: string; intentos: number; enLlamadaDesde?: string | null;
+  estado: string; intentos: number; enLlamadaDesde?: string | null; creadoEn?: string;
   asignadoA: { nombre: string }; asignadoAId: string; cargadoPor: { nombre: string };
   llamadas: { nota?: string | null; creadoEn: string }[];
 };
@@ -27,6 +27,9 @@ const ROL: Record<string, string> = {
   ADMIN: "Administrador", CARGADOR: "Spamer", CALLER: "Caller",
   ENCARGADO: "Encargado de equipo", PROCESADOR: "Procesador de pago",
 };
+/** Fecha corta con hora, como la usan las tablas: 18/08 14:32 */
+const fechaHora = (iso?: string | null) =>
+  iso ? new Date(iso).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const eti = (e: string) => ETI[e] ?? { txt: e, color: "var(--tinta2)" };
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
 const desde = (iso?: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 1000) : 0);
@@ -250,7 +253,7 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>¿Vas a llamar a este cliente ahora?</h2>
             <p className="sub">{porConfirmar.nombre} · DNI {porConfirmar.dni}</p>
-            <p className="sub">Data cargada por <b>{porConfirmar.cargadoPor?.nombre ?? "—"}</b></p>
+            <p className="sub">Data cargada por <b>{porConfirmar.cargadoPor?.nombre ?? "—"}</b> el {fechaHora(porConfirmar.creadoEn)}</p>
             <div className="numero" style={{ fontSize: 26, margin: "10px 0" }}>{porConfirmar.telefono}</div>
             <p className="sub">Si decís que sí, tu supervisor va a ver que estás en llamada y arranca el cronómetro.</p>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
@@ -344,7 +347,7 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
           <a className="numero" href={`tel:${enCurso.telefono.replace(/\D/g, "")}`}>{enCurso.telefono}</a>
           <p className="sub">
             DNI <span className="mono">{enCurso.dni}</span> · {enCurso.intentos} intento(s) ·
-            data de <b>{enCurso.cargadoPor?.nombre ?? "—"}</b>
+            data de <b>{enCurso.cargadoPor?.nombre ?? "—"}</b> · cargada el {fechaHora(enCurso.creadoEn)}
           </p>
           {enCurso.nota && <p style={{ marginTop: 8 }}><b>Nota:</b> {enCurso.nota}</p>}
           <label>Nota de la llamada</label>
@@ -367,9 +370,10 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
         <h2>Mis pendientes · {pendientes.length}</h2>
         <p className="sub">Solo ves los contactos asignados a vos.</p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Estado</th><th>Intentos</th><th /></tr>
+          <tr><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Estado</th><th>Intentos</th><th /></tr>
           {pendientes.map((l) => (
             <tr key={l.id}>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.creadoEn)}</td>
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
@@ -379,7 +383,7 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
               <td><button className="btn sec chico" disabled={!!enCurso} onClick={() => setPorConfirmar(l)}>Llamar</button></td>
             </tr>
           ))}
-          {!pendientes.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes.</td></tr>}
+          {!pendientes.length && <tr><td colSpan={8} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes.</td></tr>}
         </tbody></table></div>
         {enCurso && <div className="tip">Terminá la llamada en curso antes de abrir otra ficha.</div>}
       </div>
@@ -713,11 +717,12 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
         {editable === "spamer" && <p className="sub">Podés corregir o borrar una ficha mientras el caller no la haya llamado todavía.</p>}
         <div className="tabla-scroll"><table><tbody>
           <tr>
-            <th>Ficha</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
+            <th>Ficha</th><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
           </tr>
           {filtrados.map((l) => (
             <tr key={l.id}>
               <td className="mono">{String(l.id).padStart(4, "0")}</td>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.creadoEn)}</td>
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
@@ -739,7 +744,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               )}
             </tr>
           ))}
-          {!filtrados.length && <tr><td colSpan={editable ? 10 : 9} style={{ color: "var(--tinta2)" }}>
+          {!filtrados.length && <tr><td colSpan={editable ? 11 : 10} style={{ color: "var(--tinta2)" }}>
             {leads.length ? "Ningún contacto coincide con la búsqueda." : "Todavía no hay contactos cargados."}
           </td></tr>}
         </tbody></table></div>

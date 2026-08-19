@@ -26,7 +26,9 @@ export async function GET() {
       include: { asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },
                  llamadas: { orderBy: { creadoEn: "desc" }, take: 1 } },
       // enLlamadaDesde y asignadoAId vienen por defecto al ser campos escalares
-      orderBy: [{ estado: "asc" }, { id: "asc" }],
+      // El caller trabaja lo más viejo primero (la data se enfría);
+      // el resto ve lo último cargado arriba.
+      orderBy: s.rol === "CALLER" ? [{ estado: "asc" }, { creadoEn: "asc" }] : [{ creadoEn: "desc" }],
       take: 500,
     });
     return Response.json({ leads });
