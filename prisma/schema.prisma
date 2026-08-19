@@ -13,6 +13,8 @@ enum Rol {
   ADMIN
   CARGADOR
   CALLER
+  ENCARGADO   // jefe de un grupo: cobra 10% de las ventas de su gente
+  PROCESADOR  // procesa el pago de la venta: cobra 10% de esa venta
 }
 enum EstadoLead {
   PENDIENTE
@@ -42,6 +44,15 @@ model Usuario {
   suscripciones  Suscripcion[]
   eventos        Evento[]
   ultimoLatido   DateTime?
+
+  // Un encargado tiene a cargo a varios callers y spamers.
+  encargado      Usuario?  @relation("equipo", fields: [encargadoId], references: [id])
+  encargadoId    String?
+  equipo         Usuario[] @relation("equipo")
+
+  // Ventas que esta persona procesó como procesador de pago.
+  procesadas     Llamada[] @relation("procesador")
+  pagos          Pago[]
   sesionActual   String?   // id de la única sesión válida: al entrar en otro lado, la anterior muere
 }
 
@@ -76,6 +87,8 @@ model Llamada {
   callerId  String
   resultado    EstadoLead
   monto        Float?   // soles cobrados al cliente (obligatorio cuando aceptó)
+  procesador   Usuario? @relation("procesador", fields: [procesadorId], references: [id])
+  procesadorId String?
   referencia   String?  // nº de operación, voucher o comprobante
   validada     Boolean  @default(false) // el admin confirmó que el dinero entró
   anulada      Boolean  @default(false) // venta caída: no cuenta para comisión ni ranking
@@ -144,4 +157,23 @@ model Suscripcion {
   creadoEn  DateTime @default(now())
 
   @@index([usuarioId])
+}
+
+/// Cada pago que el admin le hace a un trabajador. El saldo pendiente
+/// sale de restar los pagos a lo devengado, así se puede pagar cualquier día.
+model Pago {
+  id         Int      @id @default(autoincrement())
+  usuario    Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuarioId  String
+  monto      Float
+  concepto   String?
+  metodo     String?  // efectivo, yape, transferencia...
+  referencia String?
+  lote       String?  // agrupa los pagos hechos juntos, para la boleta
+  detalle    String?  // foto del cálculo al momento de pagar (JSON)
+  creadoPor  String
+  creadoEn   DateTime @default(now())
+
+  @@index([usuarioId, creadoEn])
+  @@index([lote])
 }

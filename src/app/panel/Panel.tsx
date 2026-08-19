@@ -4,14 +4,16 @@ import { useRouter } from "next/navigation";
 import Avisador from "./Avisador";
 import { Marca } from "../Logo";
 
-type Sesion = { id: string; usuario: string; nombre: string; rol: "ADMIN" | "CARGADOR" | "CALLER" };
+import type { Rol } from "@/lib/auth";
+// Un solo lugar define los roles: src/lib/auth.ts
+type Sesion = { id: string; usuario: string; nombre: string; rol: Rol };
 type Lead = {
   id: number; nombre: string; dni: string; telefono: string; nota?: string | null;
   estado: string; intentos: number; enLlamadaDesde?: string | null;
   asignadoA: { nombre: string }; asignadoAId: string; cargadoPor: { nombre: string };
   llamadas: { nota?: string | null; creadoEn: string }[];
 };
-type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean };
+type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean; encargadoId?: string | null };
 type Llamada = { id: number; resultado: string; nota?: string | null; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
 
 const ETI: Record<string, { txt: string; color: string }> = {
@@ -21,7 +23,10 @@ const ETI: Record<string, { txt: string; color: string }> = {
   ACEPTO: { txt: "Aceptó", color: "var(--acepto)" },
   NO_QUISO: { txt: "No quiso", color: "var(--noquiso)" },
 };
-const ROL: Record<string, string> = { ADMIN: "Administrador", CARGADOR: "Spamer", CALLER: "Caller" };
+const ROL: Record<string, string> = {
+  ADMIN: "Administrador", CARGADOR: "Spamer", CALLER: "Caller",
+  ENCARGADO: "Encargado de equipo", PROCESADOR: "Procesador de pago",
+};
 const eti = (e: string) => ETI[e] ?? { txt: e, color: "var(--tinta2)" };
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
 const desde = (iso?: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 1000) : 0);
@@ -38,13 +43,17 @@ function useTicker(activo: boolean) {
 
 export default function Panel({ sesion }: { sesion: Sesion }) {
   const pestanas: [string, string][] =
+    sesion.rol === "PROCESADOR" ? [["liquidacion", "💵 Mi liquidación"]] :
+    sesion.rol === "ENCARGADO" ? [["liquidacion", "💵 Mi liquidación"], ["todos", "Contactos de mi equipo"]] :
     sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
-    sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
-    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
+    sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
+    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["finanzas", "📊 Finanzas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
 
   const marca =
     sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#14532D" } :
     sesion.rol === "CARGADOR" ? { titulo: "Mesa de spamer", color: "#4C1D95" } :
+    sesion.rol === "ENCARGADO" ? { titulo: "Encargado de equipo", color: "#0F4C5C" } :
+    sesion.rol === "PROCESADOR" ? { titulo: "Procesos de pago", color: "#7A3E12" } :
     { titulo: "Supervisión", color: "#1F2937" };
 
   const [vista, setVista] = useState(pestanas[0][0]);
@@ -61,10 +70,8 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     if (r.status === 440) return router.push("/?m=inactividad");
     if (r.status === 401) return router.push("/?m=vencida");
     if (r.ok) setLeads((await r.json()).leads ?? []);
-    if (sesion.rol !== "CALLER") {
-      const u = await fetch("/api/usuarios");
-      if (u.ok) setUsuarios((await u.json()).usuarios ?? []);
-    }
+    const u = await fetch("/api/usuarios");
+    if (u.ok) setUsuarios((await u.json()).usuarios ?? []);
   }, [router, sesion.rol]);
 
   useEffect(() => {
@@ -75,7 +82,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 
   // Al entrar, le recordamos en qué puesto está: lo primero que ve al abrir la app.
   useEffect(() => {
-    if (sesion.rol === "ADMIN") return;
+    if (!["CALLER", "CARGADOR"].includes(sesion.rol)) return;
     if (!new URLSearchParams(window.location.search).has("bienvenida")) return;
     window.history.replaceState({}, "", "/panel"); // que no reaparezca al recargar
 
@@ -179,7 +186,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         )}
         <Avisador bloqueante={sesion.rol === "CALLER"} onListo={setAvisosOk} />
         {vista === "cola" && (avisosOk
-          ? <Cola leads={leads} recargar={cargar} />
+          ? <Cola leads={leads} recargar={cargar} procesadores={usuarios.filter((u) => u.rol === "PROCESADOR" && u.activo)} />
           : <div className="tarjeta"><h2>Avisos desactivados</h2><p className="sub">Tu cola aparece apenas actives las notificaciones. Es obligatorio para trabajar.</p></div>)}
         {vista === "historial" && <Historial soyAdmin={false} />}
         {vista === "cargar" && <Cargar usuarios={usuarios} recargar={cargar} />}
@@ -191,17 +198,18 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         {vista === "avisos" && <Avisos />}
         {vista === "ranking" && <Ranking sesion={sesion} />}
         {vista === "cielo" && <Cielo sesion={sesion} />}
-        {vista === "liquidacion" && <Liquidacion sesion={sesion} />}
+        {vista === "liquidacion" && <Liquidacion sesion={sesion} usuarios={usuarios} />}
+        {vista === "finanzas" && <Finanzas />}
       </main>
     </>
   );
 }
 
 /* ============ CALLER: cola con confirmación antes de llamar ============ */
-function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
+function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () => void; procesadores: Usuario[] }) {
   const [porConfirmar, setPorConfirmar] = useState<Lead | null>(null);
   const [nota, setNota] = useState(""), [msg, setMsg] = useState("");
-  const [cobro, setCobro] = useState<{ monto: string; referencia: string } | null>(null);
+  const [cobro, setCobro] = useState<{ monto: string; referencia: string; procesadorId: string } | null>(null);
   const [festejo, setFestejo] = useState<any>(null);
   const enCurso = leads.find((l) => l.enLlamadaDesde);
   useTicker(!!enCurso);
@@ -271,13 +279,25 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
                 </b>
               </p>
             )}
+            {!!procesadores.length && (
+              <>
+                <label htmlFor="proc">¿Quién procesó el pago? *</label>
+                <select id="proc" value={cobro.procesadorId} onChange={(e) => setCobro({ ...cobro, procesadorId: e.target.value })}>
+                  <option value="">Elegí el procesador…</option>
+                  {procesadores.map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
+                </select>
+              </>
+            )}
             <label htmlFor="ref">N° de operación o voucher (opcional)</label>
             <input id="ref" className="mono" placeholder="Ej: 0098234" value={cobro.referencia}
                    onChange={(e) => setCobro({ ...cobro, referencia: e.target.value })} />
             <div className="tip">Sin monto no se puede cerrar como “Aceptó”. Tu supervisor revisa y valida cada venta.</div>
             <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <button className="btn" style={{ flex: 1 }} disabled={!(Number(cobro.monto) > 0)}
-                      onClick={() => registrar(enCurso.id, "ACEPTO", { monto: Number(cobro.monto), referencia: cobro.referencia })}>
+              <button className="btn" style={{ flex: 1 }}
+                      disabled={!(Number(cobro.monto) > 0) || (!!procesadores.length && !cobro.procesadorId)}
+                      onClick={() => registrar(enCurso.id, "ACEPTO", {
+                        monto: Number(cobro.monto), referencia: cobro.referencia, procesadorId: cobro.procesadorId || null,
+                      })}>
                 Confirmar venta
               </button>
               <button className="btn sec" onClick={() => setCobro(null)}>Volver</button>
@@ -330,7 +350,7 @@ function Cola({ leads, recargar }: { leads: Lead[]; recargar: () => void }) {
           <label>Nota de la llamada</label>
           <textarea value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: pidió que lo llamen después de las 18 h" />
           <div className="resultados">
-            <button className="res a" onClick={() => setCobro({ monto: "", referencia: "" })}>Aceptó</button>
+            <button className="res a" onClick={() => setCobro({ monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "" })}>Aceptó</button>
             <button className="res n" onClick={() => registrar(enCurso.id, "NO_CONTESTO")}>No contestó</button>
             <button className="res x" onClick={() => registrar(enCurso.id, "NO_QUISO")}>No quiso</button>
             <button className="res v" onClick={() => registrar(enCurso.id, "VOLVER_A_LLAMAR")}>Volver a llamar</button>
@@ -482,6 +502,7 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
   const vacio = { nombre: "", dni: "", telefono: "", nota: "", asignadoA: "" };
   const [f, setF] = useState(vacio);
   const [msg, setMsg] = useState<any>(null);
+  const [masivo, setMasivo] = useState(""), [destinoMasivo, setDestinoMasivo] = useState("");
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
   const num = (t: string) => t.replace(/\D/g, "");
   const faltan = !f.nombre.trim() || num(f.dni).length < 6 || num(f.telefono).length < 6 || !f.asignadoA;
@@ -532,6 +553,28 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         </button>
       </div>
 
+      <div className="tarjeta">
+        <h2>Carga masiva</h2>
+        <p className="sub">Una línea por persona: <span className="mono">nombre, DNI, teléfono, nota</span></p>
+        <label>Caller que recibe toda esta lista <b style={{ color: "var(--noquiso)" }}>*</b></label>
+        <select value={destinoMasivo} onChange={(e) => setDestinoMasivo(e.target.value)}>
+          <option value="">Elegí el caller…</option>
+          {callers.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+        <label style={{ marginTop: 10 }}>Pegá acá tu lista</label>
+        <textarea className="mono" style={{ minHeight: 130 }} value={masivo} onChange={(e) => setMasivo(e.target.value)}
+                  placeholder={"Carla Méndez, 45868665, 987654321, pidió info\nJulián Ríos, 40912233, 912345678"} />
+        <div className="tip">
+          Podés pegar directo desde una planilla: cada fila se convierte en un contacto. Los que tengan DNI o teléfono
+          repetido se descartan solos y te los listo abajo.
+        </div>
+        <button className="btn sec" style={{ marginTop: 12 }} disabled={!destinoMasivo || !masivo.trim()} onClick={() => {
+          const contactos = masivo.split("\n").map((l) => l.split(/[,;\t]/).map((t) => t.trim())).filter((p) => p[0])
+            .map(([nombre, dni, telefono, ...resto]) => ({ nombre, dni, telefono, nota: resto.join(", "), asignadoA: destinoMasivo }));
+          enviar({ contactos }); setMasivo("");
+        }}>{destinoMasivo ? `Cargar ${masivo.split("\n").filter((l) => l.trim()).length} contacto(s)` : "Elegí el caller primero"}</button>
+      </div>
+
     </>
   );
 }
@@ -542,7 +585,19 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
   const [edit, setEdit] = useState<Lead | null>(null);
   const [form, setForm] = useState<any>({});
   const [msg, setMsg] = useState("");
+  const [texto, setTexto] = useState("");
+  const [fCaller, setFCaller] = useState(""), [fSpamer, setFSpamer] = useState(""), [fEstado, setFEstado] = useState("");
   useTicker(!!admin);
+
+  // Busca por nombre, DNI o teléfono, y filtra por caller, spamer y estado.
+  const t = texto.trim().toLowerCase();
+  const filtrados = leads.filter((l) =>
+    (!t || l.nombre.toLowerCase().includes(t) || l.dni?.includes(t) || l.telefono.replace(/\D/g, "").includes(t.replace(/\D/g, "")) || String(l.id).padStart(4, "0").includes(t)) &&
+    (!fCaller || l.asignadoA?.nombre === fCaller) &&
+    (!fSpamer || l.cargadoPor?.nombre === fSpamer) &&
+    (!fEstado || l.estado === fEstado)
+  );
+  const nombresDe = (sel: (l: Lead) => string | undefined) => [...new Set(leads.map(sel).filter(Boolean))] as string[];
 
   function abrir(l: Lead) {
     setEdit(l);
@@ -602,14 +657,44 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
       )}
 
       <div className="tarjeta">
-        <h2>Contactos · {leads.length}</h2>
+        <h2>Contactos · {filtrados.length}{filtrados.length !== leads.length && <span className="sub"> de {leads.length}</span>}</h2>
+        <div className="grid2" style={{ marginBottom: 12 }}>
+          <div style={{ gridColumn: "span 2" }}>
+            <label>Buscar por nombre, DNI, teléfono o N° de ficha</label>
+            <input value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Ej: 40129360 · 932581865 · Carlos" />
+          </div>
+          <div><label>Caller</label>
+            <select value={fCaller} onChange={(e) => setFCaller(e.target.value)}>
+              <option value="">Todos</option>
+              {nombresDe((l) => l.asignadoA?.nombre).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div><label>Spamer</label>
+            <select value={fSpamer} onChange={(e) => setFSpamer(e.target.value)}>
+              <option value="">Todos</option>
+              {nombresDe((l) => l.cargadoPor?.nombre).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div><label>Estado</label>
+            <select value={fEstado} onChange={(e) => setFEstado(e.target.value)}>
+              <option value="">Todos</option>
+              {Object.entries(ETI).map(([k, v]) => <option key={k} value={k}>{v.txt}</option>)}
+            </select>
+          </div>
+        </div>
+        {(texto || fCaller || fSpamer || fEstado) && (
+          <button className="btn sec chico" style={{ marginBottom: 12 }}
+                  onClick={() => { setTexto(""); setFCaller(""); setFSpamer(""); setFEstado(""); }}>
+            Limpiar filtros
+          </button>
+        )}
         {editable === "admin" && <p className="sub">Tocá “Corregir” para arreglar cualquier dato, reasignar el caller o cambiar el resultado.</p>}
         {editable === "spamer" && <p className="sub">Podés corregir o borrar una ficha mientras el caller no la haya llamado todavía.</p>}
         <div className="tabla-scroll"><table><tbody>
           <tr>
             <th>Ficha</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
           </tr>
-          {leads.map((l) => (
+          {filtrados.map((l) => (
             <tr key={l.id}>
               <td className="mono">{String(l.id).padStart(4, "0")}</td>
               <td><b>{l.nombre}</b></td>
@@ -633,7 +718,9 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               )}
             </tr>
           ))}
-          {!leads.length && <tr><td colSpan={editable ? 10 : 9} style={{ color: "var(--tinta2)" }}>Todavía no hay contactos cargados.</td></tr>}
+          {!filtrados.length && <tr><td colSpan={editable ? 10 : 9} style={{ color: "var(--tinta2)" }}>
+            {leads.length ? "Ningún contacto coincide con la búsqueda." : "Todavía no hay contactos cargados."}
+          </td></tr>}
         </tbody></table></div>
       </div>
     </>
@@ -644,12 +731,19 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
 function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => void }) {
   const [f, setF] = useState({ nombre: "", usuario: "", clave: "", rol: "CALLER", telefono: "" });
   const [msg, setMsg] = useState("");
+  const [equipoNuevo, setEquipoNuevo] = useState<string[]>([]);
+  const [editandoEquipo, setEditandoEquipo] = useState<Usuario | null>(null);
+  const asignables = usuarios.filter((u) => ["CALLER", "CARGADOR"].includes(u.rol) && u.activo);
+  const alternar = (lista: string[], id: string) => lista.includes(id) ? lista.filter((x) => x !== id) : [...lista, id];
 
   async function crear() {
-    const r = await fetch("/api/usuarios", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(f) });
+    const r = await fetch("/api/usuarios", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...f, equipo: f.rol === "ENCARGADO" ? equipoNuevo : undefined }),
+    });
     const d = await r.json();
     setMsg(r.ok ? "Usuario creado." : d.error);
-    if (r.ok) { setF({ nombre: "", usuario: "", clave: "", rol: "CALLER", telefono: "" }); recargar(); }
+    if (r.ok) { setF({ nombre: "", usuario: "", clave: "", rol: "CALLER", telefono: "" }); setEquipoNuevo([]); recargar(); }
   }
   async function editar(id: string, cambios: any) {
     await fetch("/api/usuarios", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...cambios }) });
@@ -669,6 +763,11 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
 
   return (
     <>
+      {editandoEquipo && (
+        <VentanaEquipo encargado={editandoEquipo} asignables={asignables} usuarios={usuarios}
+                       cerrar={() => setEditandoEquipo(null)}
+                       guardar={async (ids) => { await editar(editandoEquipo.id, { equipo: ids }); setEditandoEquipo(null); }} />
+      )}
       <div className="tarjeta">
         <h2>Crear usuario</h2>
         <p className="sub">Cada persona con su cuenta: así queda claro quién cargó cada dato y quién hizo cada llamada.</p>
@@ -678,12 +777,30 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
           <div><label>Contraseña (mín. 8)</label><input value={f.clave} onChange={(e) => setF({ ...f, clave: e.target.value })} /></div>
           <div><label>Rol</label>
             <select value={f.rol} onChange={(e) => setF({ ...f, rol: e.target.value })}>
-              <option value="CALLER">Caller</option>
+              <option value="CALLER">Caller (llama y vende)</option>
               <option value="CARGADOR">Spamer (carga datos)</option>
+              <option value="PROCESADOR">Procesador de pago (10% de lo que procesa)</option>
+              <option value="ENCARGADO">Encargado de equipo (10% de las ventas de su gente)</option>
               <option value="ADMIN">Administrador</option>
             </select>
           </div>
         </div>
+        {f.rol === "ENCARGADO" && (
+          <div style={{ marginTop: 14 }}>
+            <label>¿Qué personas tiene a cargo?</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {asignables.map((u) => (
+                <button key={u.id} type="button"
+                        className={`btn chico ${equipoNuevo.includes(u.id) ? "" : "sec"}`}
+                        onClick={() => setEquipoNuevo(alternar(equipoNuevo, u.id))}>
+                  {equipoNuevo.includes(u.id) ? "✓ " : ""}{u.nombre} <span style={{ opacity: .7 }}>({ROL[u.rol]})</span>
+                </button>
+              ))}
+              {!asignables.length && <span className="sub">Primero creá callers o spamers.</span>}
+            </div>
+            <div className="tip">Cobra el 10% de todas las ventas que cierren sus callers y de las que salgan de la data de sus spamers.</div>
+          </div>
+        )}
         {msg && <div className={msg.includes("creado") || msg.includes("eliminado") ? "ok" : "error"}>{msg}</div>}
         <button className="btn" style={{ marginTop: 14 }} onClick={crear}>Crear usuario</button>
       </div>
@@ -691,12 +808,21 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
         <h2>Equipo</h2>
         <p className="sub">“Eliminar” solo funciona con usuarios que nunca cargaron datos ni hicieron llamadas. Si ya trabajaron, usá “Desactivar”: no pueden entrar más, pero su historial se conserva.</p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Avisos</th><th>Estado</th><th>Contraseña</th><th /><th /></tr>
+          <tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Equipo</th><th>Avisos</th><th>Estado</th><th>Contraseña</th><th /><th /></tr>
           {usuarios.map((u) => (
             <tr key={u.id}>
               <td><b>{u.nombre}</b></td>
               <td className="mono">{u.usuario}</td>
               <td>{ROL[u.rol] ?? u.rol}</td>
+              <td>
+                {u.rol === "ENCARGADO" ? (
+                  <button className="btn sec chico" onClick={() => setEditandoEquipo(u)}>
+                    {usuarios.filter((x) => x.encargadoId === u.id).length} a cargo ✎
+                  </button>
+                ) : (
+                  <span className="sub">{usuarios.find((x) => x.id === u.encargadoId)?.nombre ?? "—"}</span>
+                )}
+              </td>
               <td><button className="btn sec chico" onClick={() => editar(u.id, { notificar: !u.notificar })}>{u.notificar ? "Sí" : "No"}</button></td>
               <td>{u.activo ? "Activo" : "Desactivado"}</td>
               <td><button className="btn sec chico" onClick={() => {
@@ -815,6 +941,50 @@ function Supervision() {
             Cada celda de resultado muestra <b>cantidad · promedio</b>. “Sospechosas” son llamadas cerradas en menos de {d.umbral} segundos:
             no hay conversación posible en ese tiempo. “Descartes” son fichas que abrió y cerró sin llamar.
           </div>
+        </div>
+      )}
+
+      {tab === "equipo" && !!d.diasLlamadas?.length && (
+        <div className="tarjeta">
+          <h2>Aceptados por día</h2>
+          <p className="sub">Sirve para ver constancia: no es lo mismo 20 ventas repartidas que 20 en un solo día.</p>
+          <div className="tabla-scroll"><table><tbody>
+            <tr>
+              <th>Caller</th>
+              {d.diasLlamadas.map((dia: string) => (
+                <th key={dia} style={{ textAlign: "center" }}>
+                  {new Date(dia + "T12:00:00").toLocaleDateString("es", { weekday: "short", day: "2-digit" })}
+                </th>
+              ))}
+              <th style={{ textAlign: "center" }}>Total</th>
+            </tr>
+            {d.porCaller.map((c: any) => (
+              <tr key={c.id}>
+                <td><b>{c.nombre}</b></td>
+                {d.diasLlamadas.map((dia: string) => {
+                  const n = c.aceptadosPorDia?.find((x: any) => x.dia === dia)?.n ?? 0;
+                  return (
+                    <td key={dia} className="mono" style={{
+                      textAlign: "center", fontWeight: n ? 600 : 400,
+                      color: n ? "var(--acepto)" : "var(--linea)",
+                    }}>{n || "·"}</td>
+                  );
+                })}
+                <td className="mono" style={{ textAlign: "center", fontWeight: 700 }}>{c.acepto.n}</td>
+              </tr>
+            ))}
+            <tr style={{ background: "#F6F9F3" }}>
+              <td><b>Total del día</b></td>
+              {d.diasLlamadas.map((dia: string) => (
+                <td key={dia} className="mono" style={{ textAlign: "center", fontWeight: 700 }}>
+                  {d.porCaller.reduce((n: number, c: any) => n + (c.aceptadosPorDia?.find((x: any) => x.dia === dia)?.n ?? 0), 0)}
+                </td>
+              ))}
+              <td className="mono" style={{ textAlign: "center", fontWeight: 700 }}>
+                {d.porCaller.reduce((n: number, c: any) => n + c.acepto.n, 0)}
+              </td>
+            </tr>
+          </tbody></table></div>
         </div>
       )}
 
@@ -1260,8 +1430,11 @@ function TablaCielo({ titulo, rol, gente, unidad }:
 /* ============ LIQUIDACIÓN ============ */
 const soles = (n: number) => `S/ ${(n ?? 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-function Liquidacion({ sesion }: { sesion: Sesion }) {
+function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[] }) {
   const [d, setD] = useState<any>(null);
+  const [verDetalle, setVerDetalle] = useState(false);
+  const [editandoProc, setEditandoProc] = useState<any>(null);
+  const procesadores = usuarios.filter((u) => u.rol === "PROCESADOR" && u.activo);
   const admin = sesion.rol === "ADMIN";
   const traer = useCallback(() => {
     fetch(`/api/liquidacion${admin ? "?todos=1" : ""}`).then((r) => (r.ok ? r.json() : null)).then(setD);
@@ -1279,45 +1452,79 @@ function Liquidacion({ sesion }: { sesion: Sesion }) {
   if (admin) {
     return (
       <>
+        {editandoProc && (
+          <div className="velo" onClick={() => setEditandoProc(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+              <h2>¿Quién procesó este pago?</h2>
+              <p className="sub">
+                {editandoProc.cliente} · {soles(editandoProc.monto)} · cerrada por {editandoProc.caller}
+              </p>
+              <label>Procesador de pago</label>
+              <select defaultValue={procesadores.find((pr) => pr.nombre === editandoProc.procesador)?.id ?? ""}
+                      onChange={(e) => setEditandoProc({ ...editandoProc, nuevoId: e.target.value })}>
+                <option value="">Sin procesador asignado</option>
+                {procesadores.map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
+              </select>
+              <div className="tip">Al cambiarlo, la comisión del 10% pasa al procesador nuevo y se le descuenta al anterior.</div>
+              <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                <button className="btn" style={{ flex: 1 }} onClick={async () => {
+                  await revisar(editandoProc.id, { procesadorId: editandoProc.nuevoId ?? "" });
+                  setEditandoProc(null);
+                }}>Guardar</button>
+                <button className="btn sec" onClick={() => setEditandoProc(null)}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="grid4">
           <div className="metrica"><span className="rotulo">Vendido esta semana</span><b style={{ fontSize: 22 }}>{soles(d.totales.vendido)}</b></div>
-          <div className="metrica"><span className="rotulo">Ventas cerradas</span><b>{d.totales.ventas}</b></div>
-          <div className="metrica"><span className="rotulo">Comisiones</span><b style={{ fontSize: 22 }}>{soles(d.totales.comision)}</b></div>
+          <div className="metrica"><span className="rotulo">Ventas</span><b>{d.totales.ventas}</b></div>
+          <div className="metrica"><span className="rotulo">Sin validar</span><b style={{ color: d.totales.sinValidar ? "var(--nocontesto)" : undefined }}>{d.totales.sinValidar}</b></div>
           <div className="metrica"><span className="rotulo">Total a pagar</span><b style={{ fontSize: 22, color: "var(--noquiso)" }}>{soles(d.totales.aPagar)}</b></div>
         </div>
 
         <div className="tarjeta">
-          <h2>Por caller</h2>
-          <p className="sub">Comisión + bono de escalón. El total a pagar incluye los S/ {d.totales.bonos} de bonos.</p>
+          <h2>A pagar por persona</h2>
+          <p className="sub">
+            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta validada {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}.
+          </p>
           <div className="tabla-scroll"><table><tbody>
-            <tr><th>Caller</th><th>Ventas</th><th>Vendido</th><th>Ticket promedio</th><th>Tasa</th><th>Comisión</th><th>Bono</th><th>Total</th><th>Sin validar</th></tr>
+            <tr><th>Persona</th><th>Rol</th><th>Concepto</th><th>Operaciones</th><th>Base</th><th>%</th><th>Comisión</th><th>Validadas</th><th>S/ 10 c/u</th><th>Bono</th><th>Total</th></tr>
             {d.filas.map((f: any) => (
               <tr key={f.id}>
                 <td><b>{f.nombre}</b></td>
-                <td className="mono">{f.ventas}{f.anuladas > 0 && <span style={{ color: "var(--noquiso)" }}> (−{f.anuladas})</span>}</td>
-                <td className="mono">{soles(f.vendido)}</td>
-                <td className="mono">{soles(f.ticket)}</td>
-                <td className="mono">{Math.round(f.tasa * 100)}%</td>
-                <td className="mono">{soles(f.comision)}</td>
+                <td>{ROL[f.rol] ?? f.rol}</td>
+                <td className="sub">{f.concepto}</td>
+                <td className="mono">{f.operaciones}</td>
+                <td className="mono">{f.base ? soles(f.base) : "—"}</td>
+                <td className="mono">{f.tasa ? `${Math.round(f.tasa * 100)}%` : "—"}</td>
+                <td className="mono">{f.comision ? soles(f.comision) : "—"}</td>
+                <td className="mono">{f.validadas ?? 0}</td>
+                <td className="mono">{f.fijo ? soles(f.fijo) : "—"}</td>
                 <td className="mono">{f.bono ? soles(f.bono) : "—"}</td>
                 <td className="mono" style={{ fontWeight: 700 }}>{soles(f.total)}</td>
-                <td className="mono" style={{ color: f.pendientesValidar ? "var(--nocontesto)" : undefined }}>{f.pendientesValidar}</td>
               </tr>
             ))}
           </tbody></table></div>
+          <div className="tip">
+            Una misma venta paga a varias personas: el caller que la cerró, el procesador que cobró y el encargado de ese caller.
+            Sumado, hoy estás pagando <b>{d.totales.vendido ? Math.round((d.totales.aPagar / d.totales.vendido) * 100) : 0}%</b> de lo vendido.
+          </div>
         </div>
 
         <div className="tarjeta">
           <h2>Ventas de la semana</h2>
-          <p className="sub">Validá las que confirmaste que entraron y anulá las que se cayeron. Una venta anulada no paga comisión ni suma al ranking.</p>
+          <p className="sub">Validá las que confirmaste y anulá las que se cayeron. Una venta anulada no paga a nadie ni suma al ranking.</p>
           <div className="tabla-scroll"><table><tbody>
-            <tr><th>Fecha</th><th>Caller</th><th>Cliente</th><th>Monto</th><th>Referencia</th><th>Estado</th><th /></tr>
+            <tr><th>Fecha</th><th>Cliente</th><th>Caller</th><th>Spamer</th><th>Procesador</th><th>Monto</th><th>Ref.</th><th>Estado</th><th /></tr>
             {d.ventas.map((v: any) => (
               <tr key={v.id} style={v.anulada ? { opacity: .55 } : undefined}>
                 <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                <td>{v.cliente}<br /><span className="mono sub">{v.dni}</span></td>
                 <td>{v.caller}</td>
-                <td>{v.lead?.nombre}<br /><span className="mono sub">{v.lead?.dni}</span></td>
-                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto ?? 0)}</td>
+                <td>{v.spamer}</td>
+                <td>{v.procesador}</td>
+                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto)}</td>
                 <td className="mono">{v.referencia ?? "—"}</td>
                 <td>
                   {v.anulada
@@ -1329,16 +1536,17 @@ function Liquidacion({ sesion }: { sesion: Sesion }) {
                 <td style={{ display: "flex", gap: 6 }}>
                   {!v.validada && !v.anulada && <button className="btn chico" onClick={() => revisar(v.id, { validada: true })}>Validar</button>}
                   {!v.anulada
-                    ? <button className="btn chico sec" onClick={() => confirm("¿Anular esta venta? No paga comisión ni cuenta para el ranking.") && revisar(v.id, { anulada: true, validada: false })}>Anular</button>
+                    ? <button className="btn chico sec" onClick={() => confirm("¿Anular esta venta? Deja de pagar comisiones y no cuenta para el ranking.") && revisar(v.id, { anulada: true, validada: false })}>Anular</button>
                     : <button className="btn chico sec" onClick={() => revisar(v.id, { anulada: false })}>Restaurar</button>}
                   <button className="btn chico sec" onClick={() => {
                     const m = prompt("Corregir el monto en soles:", String(v.monto ?? 0));
                     if (m !== null && Number(m) > 0) revisar(v.id, { monto: Number(m) });
                   }}>Monto</button>
+                  <button className="btn chico sec" onClick={() => setEditandoProc(v)}>Procesador</button>
                 </td>
               </tr>
             ))}
-            {!d.ventas.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Sin ventas esta semana.</td></tr>}
+            {!d.ventas.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>Sin ventas esta semana.</td></tr>}
           </tbody></table></div>
         </div>
       </>
@@ -1352,54 +1560,394 @@ function Liquidacion({ sesion }: { sesion: Sesion }) {
         <span className="rotulo" style={{ color: "#9FC9D2" }}>Llevás ganado esta semana</span>
         <div className="mono" style={{ fontSize: 52, fontWeight: 700, lineHeight: 1.1, margin: "4px 0" }}>{soles(m.total)}</div>
         <p style={{ opacity: .85, fontSize: 14 }}>
-          {soles(m.comision)} de comisión{m.bono > 0 && <> + {soles(m.bono)} de bono</>}
+          {[
+            m.comision > 0 && `${soles(m.comision)} de comisión`,
+            m.fijo > 0 && `${soles(m.fijo)} por ${m.validadas} venta(s) validada(s)`,
+            m.bono > 0 && `${soles(m.bono)} de bono`,
+          ].filter(Boolean).join("  +  ") || "Todavía no sumaste esta semana"}
         </p>
       </div>
 
       <div className="grid4">
-        <div className="metrica"><span className="rotulo">Ventas</span><b>{m.ventas}</b></div>
-        <div className="metrica"><span className="rotulo">Vendido</span><b style={{ fontSize: 21 }}>{soles(m.vendido)}</b></div>
-        <div className="metrica"><span className="rotulo">Tu tasa</span><b>{Math.round(m.tasa * 100)}%</b></div>
-        <div className="metrica"><span className="rotulo">Venta promedio</span><b style={{ fontSize: 21 }}>{soles(m.ticket)}</b></div>
-      </div>
-
-      {m.siguiente && (
-        <div className="tarjeta">
-          <b>Te faltan {m.siguiente.meta - m.ventas} ventas para el bono de S/ {m.siguiente.bono}</b>
-          <div className="barra" style={{ marginTop: 10, height: 12 }}>
-            <span style={{ width: `${Math.min(100, (m.ventas / m.siguiente.meta) * 100)}%` }} />
-          </div>
-          <p className="sub" style={{ marginTop: 8 }}>
-            {m.tasa > 0.1
-              ? "Estás cobrando al 12% por haber salido 1° la semana pasada."
-              : "Si salís 1° en el ranking, la próxima semana cobrás al 12%."}
-          </p>
+        <div className="metrica">
+          <span className="rotulo">{m.rol === "CARGADOR" ? "Data subida" : m.rol === "PROCESADOR" ? "Pagos procesados" : m.rol === "ENCARGADO" ? "Ventas del equipo" : "Ventas"}</span>
+          <b>{m.operaciones}</b>
         </div>
-      )}
+        <div className="metrica"><span className="rotulo">{m.rol === "CARGADOR" ? "Generado con tu data" : "Monto base"}</span><b style={{ fontSize: 21 }}>{soles(m.base)}</b></div>
+        <div className="metrica"><span className="rotulo">Tu porcentaje</span><b>{m.tasa ? `${Math.round(m.tasa * 100)}%` : "—"}</b></div>
+        <div className="metrica"><span className="rotulo">Sin validar</span><b style={{ color: m.pendientes ? "var(--nocontesto)" : undefined }}>{m.pendientes}</b></div>
+      </div>
 
       <div className="tarjeta">
-        <h2>Mis ventas de la semana</h2>
-        <p className="sub">Tu supervisor valida cada una. Si se cae una venta, se anula y deja de contar.</p>
-        <div className="tabla-scroll"><table><tbody>
-          <tr><th>Fecha</th><th>Cliente</th><th>Monto</th><th>Tu comisión</th><th>Estado</th></tr>
-          {d.detalle.map((v: any) => (
-            <tr key={v.id} style={v.anulada ? { opacity: .55 } : undefined}>
-              <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-              <td>{v.lead?.nombre}</td>
-              <td className="mono">{soles(v.monto ?? 0)}</td>
-              <td className="mono" style={{ color: "var(--acepto)", fontWeight: 600 }}>{soles((v.monto ?? 0) * m.tasa)}</td>
-              <td>
-                {v.anulada
-                  ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>Anulada</span>
-                  : v.validada
-                    ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>Validada</span>
-                    : <span className="eti" style={{ color: "var(--nocontesto)", borderColor: "var(--nocontesto)" }}>En revisión</span>}
-              </td>
-            </tr>
-          ))}
-          {!d.detalle.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Todavía no cerraste ventas esta semana.</td></tr>}
-        </tbody></table></div>
+        <b>{m.concepto}</b>
+        {["CALLER", "CARGADOR"].includes(m.rol) && (
+          <p className="sub" style={{ marginTop: 6 }}>
+            Además de tu porcentaje, cobrás <b>S/ {m.porValidada ?? 10} por cada venta validada</b>.
+            Llevás <b>{m.validadas ?? 0}</b> validada(s) de {m.rol === "CALLER" ? m.detalle.filter((v: any) => !v.anulada).length : m.ventasGeneradas} —
+            las que están “en revisión” pasan a contar cuando el supervisor las confirme.
+          </p>
+        )}
+        {m.siguiente && (
+          <>
+            <p className="sub" style={{ marginTop: 8 }}>
+              Te faltan <b>{m.siguiente.meta - m.operaciones}</b> para el bono de <b>S/ {m.siguiente.bono}</b>.
+            </p>
+            <div className="barra" style={{ marginTop: 8, height: 12 }}>
+              <span style={{ width: `${Math.min(100, (m.operaciones / m.siguiente.meta) * 100)}%` }} />
+            </div>
+          </>
+        )}
+        {m.rol === "ENCARGADO" && !!m.equipo?.length && (
+          <p className="sub" style={{ marginTop: 10 }}>
+            Tu equipo: {m.equipo.map((x: any) => x.nombre).join(", ")}
+          </p>
+        )}
+        {m.rol === "CARGADOR" && (
+          <p className="sub" style={{ marginTop: 10 }}>
+            Tu data generó <b>{m.ventasGeneradas}</b> venta(s) por {soles(m.base)}: cobrás el {Math.round(m.tasa * 100)}% de eso.
+            {m.tasa > 0.1 && " Estás al 12% por haber ganado el ranking la semana pasada."}
+          </p>
+        )}
+      </div>
+
+      <div className="tarjeta">
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <h2>Detalle de mis operaciones</h2>
+          <button className="btn sec chico" style={{ marginLeft: "auto" }} onClick={() => setVerDetalle(!verDetalle)}>
+            {verDetalle ? "Ocultar" : "Ver detalle"}
+          </button>
+        </div>
+        <p className="sub">Con quién trabajaste cada venta: caller, spamer y procesador de pago.</p>
+        {verDetalle && (
+          <div className="tabla-scroll" style={{ marginTop: 12 }}><table><tbody>
+            <tr><th>Fecha</th><th>Cliente</th><th>DNI</th><th>Caller</th><th>Spamer</th><th>Procesador</th><th>Monto</th><th>Te toca</th><th>Estado</th></tr>
+            {m.detalle.map((v: any) => (
+              <tr key={v.id} style={v.anulada ? { opacity: .5 } : undefined}>
+                <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+                <td>{v.cliente}</td>
+                <td className="mono">{v.dni}</td>
+                <td>{v.caller}</td>
+                <td>{v.spamer}</td>
+                <td>{v.procesador}</td>
+                <td className="mono">{soles(v.monto)}</td>
+                <td className="mono" style={{ color: "var(--acepto)", fontWeight: 600 }}>
+                  {v.anulada ? "—" : soles(v.monto * m.tasa)}
+                </td>
+                <td>
+                  {v.anulada
+                    ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>Anulada</span>
+                    : v.validada
+                      ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>Validada</span>
+                      : <span className="eti" style={{ color: "var(--nocontesto)", borderColor: "var(--nocontesto)" }}>En revisión</span>}
+                </td>
+              </tr>
+            ))}
+            {!m.detalle.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>Todavía no hay operaciones esta semana.</td></tr>}
+          </tbody></table></div>
+        )}
       </div>
     </>
+  );
+}
+
+/* Ventana para cambiar la gente a cargo de un encargado. */
+function VentanaEquipo({ encargado, asignables, usuarios, cerrar, guardar }:
+  { encargado: Usuario; asignables: Usuario[]; usuarios: Usuario[]; cerrar: () => void; guardar: (ids: string[]) => void }) {
+  const [sel, setSel] = useState<string[]>(usuarios.filter((u) => u.encargadoId === encargado.id).map((u) => u.id));
+  return (
+    <div className="velo" onClick={cerrar}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Equipo de {encargado.nombre}</h2>
+        <p className="sub">Tocá para agregar o sacar personas. Cobra el 10% de las ventas de los que estén marcados.</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+          {asignables.map((u) => {
+            const otro = u.encargadoId && u.encargadoId !== encargado.id
+              ? usuarios.find((x) => x.id === u.encargadoId)?.nombre : null;
+            return (
+              <button key={u.id} type="button" className={`btn chico ${sel.includes(u.id) ? "" : "sec"}`}
+                      onClick={() => setSel(sel.includes(u.id) ? sel.filter((x) => x !== u.id) : [...sel, u.id])}>
+                {sel.includes(u.id) ? "✓ " : ""}{u.nombre}
+                <span style={{ opacity: .7 }}> ({ROL[u.rol]}{otro ? ` · hoy con ${otro}` : ""})</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="tip">Una persona puede tener un solo encargado: si la marcás acá, sale del equipo del otro.</div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button className="btn" style={{ flex: 1 }} onClick={() => guardar(sel)}>Guardar equipo ({sel.length})</button>
+          <button className="btn sec" onClick={cerrar}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ============ FINANZAS (solo admin) ============ */
+function Finanzas() {
+  const [d, setD] = useState<any>(null);
+  const [tab, setTab] = useState<"resumen" | "pagar" | "historial">("resumen");
+  const [desde, setDesde] = useState(""), [hasta, setHasta] = useState("");
+  const [boleta, setBoleta] = useState<any>(null);
+
+  const traer = useCallback(() => {
+    const q = new URLSearchParams();
+    if (desde) q.set("desde", desde);
+    if (hasta) q.set("hasta", hasta);
+    fetch(`/api/finanzas?${q}`).then((r) => (r.ok ? r.json() : null)).then(setD);
+  }, [desde, hasta]);
+  useEffect(() => { traer(); }, [traer]);
+  if (!d) return <div className="tarjeta">Cargando finanzas…</div>;
+
+  const r = d.resumen;
+  const fecha = (iso: string) => new Date(iso).toLocaleString("es", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const soloDia = (dia: string) => new Date(dia + "T12:00:00").toLocaleDateString("es", { weekday: "short", day: "2-digit", month: "2-digit" });
+
+  return (
+    <>
+      {boleta && <Boleta datos={boleta} cerrar={() => { setBoleta(null); traer(); }} />}
+
+      <div className="tarjeta" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {([["resumen", "Resumen"], ["pagar", `Pagar (${d.trabajadores.filter((t: any) => t.saldo > 0.5).length})`], ["historial", "Historial de pagos"]] as [any, string][])
+          .map(([k, t]) => (
+            <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
+          ))}
+      </div>
+
+      {tab === "resumen" && (
+        <>
+          <div className="grid4">
+            <div className="metrica"><span className="rotulo">Vendido histórico</span><b style={{ fontSize: 21 }}>{soles(r.vendidoTotal)}</b></div>
+            <div className="metrica"><span className="rotulo">Pagos al equipo</span><b style={{ fontSize: 21 }}>{soles(r.totalGanado)}</b></div>
+            <div className="metrica"><span className="rotulo">Inversión ({Math.round(r.porcentajeInversion * 100)}%)</span><b style={{ fontSize: 21 }}>{soles(r.inversion)}</b></div>
+            <div className="metrica">
+              <span className="rotulo">Utilidad</span>
+              <b style={{ fontSize: 21, color: r.utilidad >= 0 ? "var(--acepto)" : "var(--noquiso)" }}>{soles(r.utilidad)}</b>
+            </div>
+          </div>
+
+          <div className="tarjeta">
+            <h2>Cómo se reparte lo vendido</h2>
+            <div className="tabla-scroll"><table><tbody>
+              <tr><th>Concepto</th><th style={{ textAlign: "right" }}>Monto</th><th style={{ textAlign: "right" }}>% de lo vendido</th></tr>
+              {[
+                ["Ventas cobradas", r.vendidoTotal, 1],
+                ["Comisiones por porcentaje", -r.comisiones, r.comisiones / (r.vendidoTotal || 1)],
+                ["Pagos fijos (S/ 10 por venta validada)", -r.fijos, r.fijos / (r.vendidoTotal || 1)],
+                ["Bonos del cielo es el límite", -r.bonos, r.bonos / (r.vendidoTotal || 1)],
+                [`Inversión inicial (${Math.round(r.porcentajeInversion * 100)}%)`, -r.inversion, r.porcentajeInversion],
+              ].map(([txt, monto, pct]: any) => (
+                <tr key={txt}>
+                  <td>{txt}</td>
+                  <td className="mono" style={{ textAlign: "right", color: monto < 0 ? "var(--noquiso)" : undefined }}>
+                    {monto < 0 ? "− " : ""}{soles(Math.abs(monto))}
+                  </td>
+                  <td className="mono" style={{ textAlign: "right" }}>{Math.round(pct * 100)}%</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#F6F9F3", fontWeight: 700 }}>
+                <td>Te queda</td>
+                <td className="mono" style={{ textAlign: "right", color: r.utilidad >= 0 ? "var(--acepto)" : "var(--noquiso)" }}>{soles(r.utilidad)}</td>
+                <td className="mono" style={{ textAlign: "right" }}>{Math.round((r.utilidad / (r.vendidoTotal || 1)) * 100)}%</td>
+              </tr>
+            </tbody></table></div>
+            <div className="tip">Pendiente de pagar al equipo: <b>{soles(r.porPagar)}</b> · ya pagado: {soles(r.totalPagado)}</div>
+          </div>
+
+          <div className="tarjeta">
+            <h2>Ventas por día</h2>
+            <div className="grid2" style={{ marginBottom: 12 }}>
+              <div><label>Desde</label><input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></div>
+              <div><label>Hasta</label><input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></div>
+            </div>
+            {(desde || hasta) && (
+              <div className="tip">
+                En el rango elegido: <b>{soles(d.vendidoRango)}</b> en {d.diasRango.reduce((n: number, x: any) => n + x.ventas, 0)} venta(s).
+                <button className="btn sec chico" style={{ marginLeft: 10 }} onClick={() => { setDesde(""); setHasta(""); }}>Ver todo</button>
+              </div>
+            )}
+            <div className="tabla-scroll"><table><tbody>
+              <tr><th>Día</th><th>Ventas</th><th>Validadas</th><th style={{ textAlign: "right" }}>Vendido</th><th style={{ width: "35%" }} /></tr>
+              {(desde || hasta ? d.diasRango : d.dias).slice(0, 40).map((x: any) => {
+                const max = Math.max(...d.dias.map((y: any) => y.monto), 1);
+                return (
+                  <tr key={x.dia}>
+                    <td className="mono">{soloDia(x.dia)}</td>
+                    <td className="mono">{x.ventas}</td>
+                    <td className="mono">{x.validadas}</td>
+                    <td className="mono" style={{ textAlign: "right", fontWeight: 600 }}>{soles(x.monto)}</td>
+                    <td><div className="barra"><span style={{ width: `${(x.monto / max) * 100}%` }} /></div></td>
+                  </tr>
+                );
+              })}
+              {!d.dias.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Todavía no hay ventas.</td></tr>}
+            </tbody></table></div>
+          </div>
+        </>
+      )}
+
+      {tab === "pagar" && <Pagar trabajadores={d.trabajadores} alPagar={setBoleta} />}
+
+      {tab === "historial" && (
+        <div className="tarjeta">
+          <h2>Historial de pagos</h2>
+          <p className="sub">Todo lo que le pagaste a cada persona, con la fecha y el método.</p>
+          <div className="tabla-scroll"><table><tbody>
+            <tr><th>Fecha</th><th>Persona</th><th>Concepto</th><th>Método</th><th>Lote</th><th style={{ textAlign: "right" }}>Monto</th><th /></tr>
+            {d.pagos.map((p: any) => (
+              <tr key={p.id}>
+                <td className="mono">{fecha(p.creadoEn)}</td>
+                <td><b>{p.nombre}</b></td>
+                <td className="sub">{p.concepto}</td>
+                <td>{p.metodo ?? "—"}</td>
+                <td className="mono sub">{p.lote}</td>
+                <td className="mono" style={{ textAlign: "right", fontWeight: 700 }}>{soles(p.monto)}</td>
+                <td>
+                  <button className="btn chico sec" onClick={async () => {
+                    if (!confirm(`¿Anular el pago de ${soles(p.monto)} a ${p.nombre}? Vuelve a quedar como saldo pendiente.`)) return;
+                    await fetch("/api/finanzas", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: p.id }) });
+                    traer();
+                  }}>Anular</button>
+                </td>
+              </tr>
+            ))}
+            {!d.pagos.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Todavía no registraste pagos.</td></tr>}
+          </tbody></table></div>
+          {!!d.pagos.length && (
+            <div className="tip">Total pagado hasta hoy: <b>{soles(d.resumen.totalPagado)}</b></div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+/* Pantalla para pagar: se elige a quién y cuánto, y sale la boleta. */
+function Pagar({ trabajadores, alPagar }: { trabajadores: any[]; alPagar: (b: any) => void }) {
+  const conSaldo = trabajadores.filter((t) => t.saldo > 0.5);
+  const [montos, setMontos] = useState<Record<string, string>>({});
+  const [metodo, setMetodo] = useState("Efectivo");
+  const [nota, setNota] = useState("");
+  const [msg, setMsg] = useState("");
+
+  const valor = (t: any) => montos[t.id] !== undefined ? Number(montos[t.id] || 0) : t.saldo;
+  const marcados = conSaldo.filter((t) => valor(t) > 0);
+  const total = marcados.reduce((n, t) => n + valor(t), 0);
+
+  async function pagar() {
+    const cuerpo = {
+      metodo, nota,
+      pagos: marcados.map((t) => ({ usuarioId: t.id, monto: Number(valor(t).toFixed(2)), concepto: `Pago a ${ROL[t.rol]}` })),
+    };
+    const r = await fetch("/api/finanzas", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
+    const res = await r.json();
+    if (!r.ok) return setMsg(res.error ?? "No se pudo registrar el pago.");
+    alPagar({
+      lote: res.lote, metodo, nota, fecha: new Date().toISOString(),
+      lineas: marcados.map((t) => ({ ...t, pagado: valor(t) })), total,
+    });
+  }
+
+  return (
+    <div className="tarjeta">
+      <h2>Pagar al equipo</h2>
+      <p className="sub">
+        Podés pagar cualquier día y cuantas veces quieras: el sistema lleva el saldo. Por defecto viene cargado
+        el saldo completo de cada uno, pero podés poner menos y el resto queda pendiente.
+      </p>
+
+      <div className="tabla-scroll" style={{ marginTop: 14 }}><table><tbody>
+        <tr><th>Persona</th><th>Rol</th><th>Ganado</th><th>Ya pagado</th><th>Saldo</th><th style={{ width: 150 }}>A pagar ahora</th></tr>
+        {conSaldo.map((t) => (
+          <tr key={t.id}>
+            <td><b>{t.nombre}</b><br /><span className="mono sub">{t.usuario}</span></td>
+            <td>{ROL[t.rol] ?? t.rol}</td>
+            <td className="mono">{soles(t.ganado)}</td>
+            <td className="mono">{soles(t.pagado)}</td>
+            <td className="mono" style={{ fontWeight: 700 }}>{soles(t.saldo)}</td>
+            <td>
+              <input className="mono" inputMode="decimal" style={{ textAlign: "right" }}
+                     value={montos[t.id] ?? t.saldo.toFixed(2)}
+                     onChange={(e) => setMontos({ ...montos, [t.id]: e.target.value.replace(/[^\d.]/g, "") })} />
+            </td>
+          </tr>
+        ))}
+        {!conSaldo.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>Nadie tiene saldo pendiente. Todo al día. 👌</td></tr>}
+      </tbody></table></div>
+
+      {!!conSaldo.length && (
+        <>
+          <div className="grid2" style={{ marginTop: 14 }}>
+            <div><label>Método de pago</label>
+              <select value={metodo} onChange={(e) => setMetodo(e.target.value)}>
+                <option>Efectivo</option><option>Yape</option><option>Plin</option>
+                <option>Transferencia</option><option>Otro</option>
+              </select>
+            </div>
+            <div><label>Nota (opcional)</label><input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: adelanto de la semana" /></div>
+          </div>
+          {msg && <div className="error">{msg}</div>}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
+            <div>
+              <span className="rotulo">Total a pagar</span>
+              <div className="mono" style={{ fontSize: 30, fontWeight: 700 }}>{soles(total)}</div>
+            </div>
+            <button className="btn" style={{ marginLeft: "auto" }} disabled={!marcados.length} onClick={pagar}>
+              Registrar pago y emitir boleta
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* Boleta detallada, lista para imprimir o guardar como PDF. */
+function Boleta({ datos, cerrar }: { datos: any; cerrar: () => void }) {
+  return (
+    <div className="velo" onClick={cerrar}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640 }}>
+        <div id="boleta">
+          <div style={{ textAlign: "center", borderBottom: "2px solid var(--linea)", paddingBottom: 12 }}>
+            <h2 style={{ fontSize: 22 }}>LIMA LIMÓN</h2>
+            <p className="sub">Boleta de pago al equipo</p>
+            <p className="mono" style={{ fontSize: 13 }}>
+              Lote {datos.lote} · {new Date(datos.fecha).toLocaleString("es")}
+            </p>
+          </div>
+
+          <table style={{ marginTop: 14 }}><tbody>
+            <tr><th>Persona</th><th>Rol</th><th>Detalle</th><th style={{ textAlign: "right" }}>Pagado</th></tr>
+            {datos.lineas.map((l: any) => (
+              <tr key={l.id}>
+                <td><b>{l.nombre}</b></td>
+                <td>{ROL[l.rol] ?? l.rol}</td>
+                <td className="sub">
+                  {l.comision > 0 && <>comisión {soles(l.comision)}<br /></>}
+                  {l.fijo > 0 && <>{l.validadas} validada(s) × S/ 10 = {soles(l.fijo)}<br /></>}
+                  {l.bono > 0 && <>bonos {soles(l.bono)}<br /></>}
+                  {l.pagado < l.saldo && <b>queda pendiente {soles(l.saldo - l.pagado)}</b>}
+                </td>
+                <td className="mono" style={{ textAlign: "right", fontWeight: 700 }}>{soles(l.pagado)}</td>
+              </tr>
+            ))}
+            <tr style={{ background: "#F6F9F3" }}>
+              <td colSpan={3} style={{ fontWeight: 700 }}>TOTAL · {datos.metodo}</td>
+              <td className="mono" style={{ textAlign: "right", fontWeight: 700, fontSize: 17 }}>{soles(datos.total)}</td>
+            </tr>
+          </tbody></table>
+
+          {datos.nota && <p className="sub" style={{ marginTop: 10 }}>Nota: {datos.nota}</p>}
+          <p className="sub" style={{ marginTop: 14, textAlign: "center" }}>
+            Documento interno de control. No es comprobante de pago electrónico.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button className="btn" style={{ flex: 1 }} onClick={() => window.print()}>Imprimir o guardar PDF</button>
+          <button className="btn sec" onClick={cerrar}>Cerrar</button>
+        </div>
+      </div>
+    </div>
   );
 }

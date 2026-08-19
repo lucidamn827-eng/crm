@@ -78,3 +78,12 @@ td{padding:9px 8px;border-bottom:1px solid #EDF2E9}
   background:#fff;border-radius:12px;padding:14px 16px;max-width:520px;margin:0 auto 16px;
   box-shadow:0 6px 16px rgba(20,52,45,.18);text-align:center;
 }
+
+/* Al imprimir, solo sale la boleta */
+@media print {
+  body * { visibility: hidden; }
+  #boleta, #boleta * { visibility: visible; }
+  #boleta { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; }
+  .velo { background: #fff; position: static; display: block; }
+  .modal { box-shadow: none; max-width: 100%; }
+}

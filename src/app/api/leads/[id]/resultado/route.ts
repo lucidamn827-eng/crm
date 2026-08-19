@@ -11,13 +11,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     const s = await exigir("ADMIN", "CALLER");
     const id = Number((await ctx.params).id);
-    const { resultado, nota, monto, referencia } = await req.json();
+    const { resultado, nota, monto, referencia, procesadorId } = await req.json();
     if (!VALIDOS.includes(resultado)) return Response.json({ error: "Resultado inválido." }, { status: 400 });
 
     // Sin monto no hay venta: es lo que después define la comisión.
     const importe = Number(monto);
     if (resultado === "ACEPTO" && (!Number.isFinite(importe) || importe <= 0)) {
       return Response.json({ error: "Para cerrar en “Aceptó” tenés que indicar cuánto pagó el cliente." }, { status: 400 });
+    }
+    // Si hay procesadores de pago cargados, hay que decir quién procesó esta venta.
+    if (resultado === "ACEPTO" && !procesadorId) {
+      const hay = await db.usuario.count({ where: { rol: "PROCESADOR", activo: true } });
+      if (hay) return Response.json({ error: "Elegí quién procesó el pago." }, { status: 400 });
     }
 
     const lead = await db.lead.findUnique({ where: { id } });
@@ -35,6 +40,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         leadId: id, callerId: s.id, resultado, nota: nota || null, duracion, abiertoEn,
         monto: resultado === "ACEPTO" ? importe : null,
         referencia: resultado === "ACEPTO" ? (referencia || null) : null,
+        procesadorId: resultado === "ACEPTO" ? (procesadorId || null) : null,
         desdeIp: ip ?? null, agente: req.headers.get("user-agent")?.slice(0, 160) ?? null,
       },
     });

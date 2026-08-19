@@ -7,10 +7,20 @@ const digitos = (t: string) => t.replace(/\D/g, "");
 /** GET: el caller ve su cola; carga y admin ven lo que corresponde. */
 export async function GET() {
   try {
-    const s = await exigir("ADMIN", "CARGADOR", "CALLER");
-    const where =
-      s.rol === "CALLER" ? { asignadoAId: s.id, estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } } :
-      s.rol === "CARGADOR" ? { cargadoPorId: s.id } : {};
+    const s = await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
+    let where: any = {};
+    if (s.rol === "CALLER") {
+      where = { asignadoAId: s.id, estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } };
+    } else if (s.rol === "CARGADOR") {
+      where = { cargadoPorId: s.id };
+    } else if (s.rol === "ENCARGADO") {
+      // Solo los contactos de la gente a su cargo.
+      const equipo = await db.usuario.findMany({ where: { encargadoId: s.id }, select: { id: true } });
+      const ids = equipo.map((u) => u.id);
+      where = ids.length ? { OR: [{ asignadoAId: { in: ids } }, { cargadoPorId: { in: ids } }] } : { id: -1 };
+    } else if (s.rol === "PROCESADOR") {
+      where = { id: -1 }; // no maneja contactos
+    }
     const leads = await db.lead.findMany({
       where: where as any,
       include: { asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },

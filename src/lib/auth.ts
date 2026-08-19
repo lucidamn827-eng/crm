@@ -7,7 +7,7 @@ const secreto = () => new TextEncoder().encode(process.env.JWT_SECRET!);
 const DIAS = 30;                // vida máxima del token
 export const MIN_INACTIVIDAD = 60; // se cierra sola tras 1 h sin actividad
 
-export type Rol = "ADMIN" | "CARGADOR" | "CALLER";
+export type Rol = "ADMIN" | "CARGADOR" | "CALLER" | "ENCARGADO" | "PROCESADOR";
 export type Sesion = { id: string; usuario: string; nombre: string; rol: Rol; sid: string };
 
 export const hashear = (clave: string) => bcrypt.hash(clave, 12);

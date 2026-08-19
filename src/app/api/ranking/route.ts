@@ -19,7 +19,7 @@ function lunesDeEstaSemana(): Date {
 /** Podio de la semana: callers por aceptados, spamers por data subida. */
 export async function GET() {
   try {
-    await exigir("ADMIN", "CARGADOR", "CALLER");
+    await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     const desde = lunesDeEstaSemana();
 
     // Semana anterior: define quién está cobrando el 2% extra ahora mismo.

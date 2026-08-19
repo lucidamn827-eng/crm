@@ -29,6 +29,10 @@ export async function GET(req: Request) {
       _count: { _all: true },
     });
 
+    const zonaOp = process.env.TZ_OPERACION ?? "America/Lima";
+    const diaDe = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: zonaOp }).format(d);
+    const diasLlamadas = [...new Set(llamadas.map((l) => diaDe(l.creadoEn)))].sort().reverse().slice(0, 7);
+
     const porCaller = callers.map((c) => {
       const mias = llamadas.filter((l) => l.callerId === c.id);
       const stat = (r: string) => {
@@ -46,6 +50,11 @@ export async function GET(req: Request) {
         noContesto: stat("NO_CONTESTO"), volver: stat("VOLVER_A_LLAMAR"),
         cortas,
         descartes: descartes.find((d) => d.usuarioId === c.id)?._count._all ?? 0,
+        // Aceptados día por día, para ver la constancia y no solo el total.
+        aceptadosPorDia: diasLlamadas.map((dia) => ({
+          dia,
+          n: mias.filter((l) => l.resultado === "ACEPTO" && !l.anulada && diaDe(l.creadoEn) === dia).length,
+        })),
       };
     });
 
@@ -57,8 +66,7 @@ export async function GET(req: Request) {
     });
 
     // Corte del día en la zona horaria de la operación.
-    const zona = process.env.TZ_OPERACION ?? "America/Lima";
-    const diaDe = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: zona }).format(d); // AAAA-MM-DD
+    // diaDe ya está definido arriba con la zona de la operación.
     const hoy = diaDe(new Date());
     const dias = [...new Set(subidas.map((l) => diaDe(l.creadoEn)))].sort().reverse().slice(0, 7);
     const porSpamer = spamers.map((sp) => {
@@ -85,6 +93,7 @@ export async function GET(req: Request) {
     return Response.json({
       porCaller,
       porSpamer,
+      diasLlamadas,
       dias,
       sospechosas: llamadas.filter((l) => l.duracion < SOSPECHOSA).slice(0, 100),
       llamadas: llamadas.slice(0, 200),

@@ -3,9 +3,9 @@ import { exigir, hashear, auditar } from "@/lib/auth";
 
 export async function GET() {
   try {
-    await exigir("ADMIN", "CARGADOR");
+    await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     const usuarios = await db.usuario.findMany({
-      select: { id: true, usuario: true, nombre: true, rol: true, telefono: true, telegramId: true, codigoTg: true, notificar: true, activo: true },
+      select: { id: true, usuario: true, nombre: true, rol: true, telefono: true, telegramId: true, codigoTg: true, notificar: true, activo: true, encargadoId: true },
       orderBy: { creadoEn: "asc" },
     });
     return Response.json({ usuarios });
@@ -15,7 +15,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const s = await exigir("ADMIN");
-    const { usuario, nombre, rol, clave, telefono } = await req.json();
+    const { usuario, nombre, rol, clave, telefono, equipo } = await req.json();
     if (!usuario || !nombre || String(clave ?? "").length < 8)
       return Response.json({ error: "Faltan datos o la contraseña tiene menos de 8 caracteres." }, { status: 400 });
     if (await db.usuario.findUnique({ where: { usuario: usuario.toLowerCase() } }))
@@ -26,6 +26,10 @@ export async function POST(req: Request) {
         hash: await hashear(clave), telefono: telefono ? String(telefono).replace(/\D/g, "") : null,
       },
     });
+    // Si es encargado, le asignamos su gente de una vez.
+    if (rol === "ENCARGADO" && Array.isArray(equipo) && equipo.length) {
+      await db.usuario.updateMany({ where: { id: { in: equipo } }, data: { encargadoId: u.id } });
+    }
     await auditar(s, "Usuario creado", `${u.usuario} (${u.rol})`);
     return Response.json({ ok: true, id: u.id });
   } catch (e) { return e as Response; }
@@ -35,7 +39,7 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const s = await exigir("ADMIN");
-    const { id, activo, telefono, notificar, clave, rol, generarCodigo } = await req.json();
+    const { id, activo, telefono, notificar, clave, rol, generarCodigo, equipo } = await req.json();
     const data: any = {};
     if (generarCodigo) data.codigoTg = Math.random().toString(36).slice(2, 8).toUpperCase();
     if (activo !== undefined) data.activo = !!activo;
@@ -46,8 +50,13 @@ export async function PATCH(req: Request) {
       if (String(clave).length < 8) return Response.json({ error: "Contraseña muy corta." }, { status: 400 });
       data.hash = await hashear(clave);
     }
+    // Reasignar el equipo de un encargado: los que saca quedan sin jefe.
+    if (Array.isArray(equipo)) {
+      await db.usuario.updateMany({ where: { encargadoId: id }, data: { encargadoId: null } });
+      if (equipo.length) await db.usuario.updateMany({ where: { id: { in: equipo } }, data: { encargadoId: id } });
+    }
     const u = await db.usuario.update({ where: { id }, data });
-    await auditar(s, "Usuario modificado", `${u.usuario}: ${Object.keys(data).join(", ")}`);
+    await auditar(s, "Usuario modificado", `${u.usuario}: ${[...Object.keys(data), ...(equipo ? ["equipo"] : [])].join(", ")}`);
     return Response.json({ ok: true, codigoTg: u.codigoTg });
   } catch (e) { return e as Response; }
 }

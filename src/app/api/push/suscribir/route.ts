@@ -4,7 +4,7 @@ import { exigir } from "@/lib/auth";
 /** Guarda el dispositivo del usuario que acaba de aceptar los avisos. */
 export async function POST(req: Request) {
   try {
-    const s = await exigir("ADMIN", "CARGADOR", "CALLER");
+    const s = await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     const { endpoint, keys, agente } = await req.json();
     if (!endpoint || !keys?.p256dh || !keys?.auth)
       return Response.json({ error: "Suscripción incompleta." }, { status: 400 });
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 /** El usuario apagó los avisos en ese dispositivo. */
 export async function DELETE(req: Request) {
   try {
-    await exigir("ADMIN", "CARGADOR", "CALLER");
+    await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     const { endpoint } = await req.json();
     await db.suscripcion.deleteMany({ where: { endpoint } });
     return Response.json({ ok: true });
