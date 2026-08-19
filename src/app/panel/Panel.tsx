@@ -547,6 +547,7 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         {msg?.error && <div className="error">{msg.error}</div>}
         {msg?.creados > 0 && <div className="ok">{msg.creados} contacto(s) cargados y avisados.</div>}
         {msg?.rechazados?.length > 0 && <div className="error">Rechazados: {msg.rechazados.join(" · ")}</div>}
+        {msg?.avisos?.length > 0 && <div className="tip">{msg.avisos.join(" · ")}</div>}
         <button className="btn" style={{ marginTop: 14 }} disabled={faltan}
                 onClick={() => { enviar(f); setF({ ...vacio, asignadoA: f.asignadoA }); }}>
           {faltan ? "Completá nombre, DNI, teléfono y caller" : "Guardar y avisar"}
@@ -556,6 +557,7 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
       <div className="tarjeta">
         <h2>Carga masiva</h2>
         <p className="sub">Una línea por persona: <span className="mono">nombre, DNI, teléfono, nota</span></p>
+        <p className="sub">Se puede cargar la misma persona con distintos teléfonos; lo que no se repite es el número.</p>
         <label>Caller que recibe toda esta lista <b style={{ color: "var(--noquiso)" }}>*</b></label>
         <select value={destinoMasivo} onChange={(e) => setDestinoMasivo(e.target.value)}>
           <option value="">Elegí el caller…</option>
@@ -589,10 +591,29 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
   const [fCaller, setFCaller] = useState(""), [fSpamer, setFSpamer] = useState(""), [fEstado, setFEstado] = useState("");
   useTicker(!!admin);
 
-  // Busca por nombre, DNI o teléfono, y filtra por caller, spamer y estado.
-  const t = texto.trim().toLowerCase();
+  // Busca por nombre, DNI, teléfono o N° de ficha. Ignora tildes y mayúsculas,
+  // y busca cada palabra por separado ("perez juan" encuentra "JUAN PEREZ").
+  const limpiar = (x: string) => (x ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const t = limpiar(texto.trim());
+  const digitos = t.replace(/\D/g, "");
+  const palabras = t.split(/\s+/).filter(Boolean);
+
+  const coincide = (l: Lead) => {
+    if (!t) return true;
+    const nombre = limpiar(l.nombre);
+    // Todas las palabras tienen que estar en el nombre, en cualquier orden.
+    if (palabras.length && palabras.every((p) => nombre.includes(p))) return true;
+    // Solo comparo contra números si escribió al menos un dígito.
+    if (digitos) {
+      if ((l.dni ?? "").includes(digitos)) return true;
+      if (l.telefono.replace(/\D/g, "").includes(digitos)) return true;
+      if (String(l.id).padStart(4, "0").includes(digitos)) return true;
+    }
+    return false;
+  };
+
   const filtrados = leads.filter((l) =>
-    (!t || l.nombre.toLowerCase().includes(t) || l.dni?.includes(t) || l.telefono.replace(/\D/g, "").includes(t.replace(/\D/g, "")) || String(l.id).padStart(4, "0").includes(t)) &&
+    coincide(l) &&
     (!fCaller || l.asignadoA?.nombre === fCaller) &&
     (!fSpamer || l.cargadoPor?.nombre === fSpamer) &&
     (!fEstado || l.estado === fEstado)

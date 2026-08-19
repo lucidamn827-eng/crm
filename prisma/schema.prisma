@@ -59,7 +59,7 @@ model Usuario {
 model Lead {
   id            Int        @id @default(autoincrement())
   nombre        String
-  dni           String     @unique
+  dni           String     // puede repetirse: la misma persona con dos teléfonos
   telefono      String     @unique
   nota          String?
   estado        EstadoLead @default(PENDIENTE)
@@ -75,6 +75,7 @@ model Lead {
   actualizadoEn DateTime   @updatedAt
   llamadas      Llamada[]
 
+  @@index([dni])
   @@index([asignadoAId, estado])
   @@index([proximoAviso])
 }

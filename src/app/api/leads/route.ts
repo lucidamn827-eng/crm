@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     const callers = await db.usuario.findMany({ where: { rol: "CALLER", activo: true } });
     if (!callers.length) return Response.json({ error: "No hay callers activos." }, { status: 400 });
 
-    const creados: number[] = [], rechazados: string[] = [];
+    const creados: number[] = [], rechazados: string[] = [], avisos: string[] = [];
     for (const f of filas) {
       const nombre = String(f.nombre ?? "").trim();
       const dni = String(f.dni ?? "").trim();
@@ -53,7 +53,7 @@ export async function POST(req: Request) {
       if (!nombre) { rechazados.push("(sin nombre): falta el nombre"); continue; }
       if (digitos(dni).length < 6) { rechazados.push(`${nombre}: DNI inválido o vacío`); continue; }
       if (digitos(telefono).length < 6) { rechazados.push(`${nombre}: teléfono inválido o vacío`); continue; }
-      if (await db.lead.findUnique({ where: { dni } })) { rechazados.push(`${nombre}: ese DNI ya está cargado`); continue; }
+      // El DNI puede repetirse (misma persona, otro teléfono). Lo único que no se repite es el número.
       if (await db.lead.findUnique({ where: { telefono } })) { rechazados.push(`${nombre}: ese teléfono ya está cargado`); continue; }
       // La asignación es obligatoria: cada ficha nace con dueño.
       const destinoId = String(f.asignadoA ?? "");
@@ -61,6 +61,7 @@ export async function POST(req: Request) {
         rechazados.push(`${nombre}: falta elegir el caller`);
         continue;
       }
+      const repetido = await db.lead.count({ where: { dni } });
       const lead = await db.lead.create({
         data: {
           nombre, dni, telefono, nota: f.nota || null,
@@ -68,10 +69,11 @@ export async function POST(req: Request) {
         },
       });
       creados.push(lead.id);
+      if (repetido) avisos.push(`${nombre}: cargado, pero ese DNI ya tenía ${repetido} contacto(s) con otro número`);
       await avisarAsignacion(lead.id);
     }
     await auditar(s, "Carga de contactos", `${creados.length} cargados, ${rechazados.length} rechazados`);
-    return Response.json({ creados: creados.length, rechazados });
+    return Response.json({ creados: creados.length, rechazados, avisos });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
