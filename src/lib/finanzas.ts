@@ -30,7 +30,8 @@ export async function devengado() {
     db.llamada.findMany({
       where: { resultado: "ACEPTO", anulada: false },
       select: { id: true, callerId: true, procesadorId: true, monto: true, validada: true, creadoEn: true,
-                lead: { select: { cargadoPorId: true } } },
+                caller: { select: { nombre: true } },
+                lead: { select: { nombre: true, dni: true, telefono: true, cargadoPorId: true, cargadoPor: { select: { nombre: true } } } } },
     }),
     db.lead.findMany({ select: { cargadoPorId: true, creadoEn: true } }),
     db.pago.findMany({ orderBy: { creadoEn: "desc" } }),
@@ -100,16 +101,41 @@ export async function devengado() {
     }
   }
 
+  // Tasa que le corresponde a cada rol sobre el monto de una venta.
+  const equipoDe = (id: string) => new Set(usuarios.filter((x) => x.encargadoId === id).map((x) => x.id));
+  const ventaFila = (v: any, tasa: number) => ({
+    fecha: v.creadoEn, cliente: v.lead?.nombre ?? "—", dni: v.lead?.dni ?? "",
+    telefono: v.lead?.telefono ?? "", caller: v.caller?.nombre ?? "—",
+    spamer: v.lead?.cargadoPor?.nombre ?? "—", monto: v.monto ?? 0,
+    validada: v.validada, tuParte: (v.monto ?? 0) * tasa,
+  });
+
+  const detalleDe = (u: any) => {
+    if (u.rol === "CALLER")
+      return ventas.filter((v) => v.callerId === u.id).map((v) => ventaFila(v, PRIMERO)); // tasa referencial; el total real ya está en comision
+    if (u.rol === "CARGADOR")
+      return ventas.filter((v) => v.lead?.cargadoPorId === u.id).map((v) => ventaFila(v, BASE));
+    if (u.rol === "PROCESADOR")
+      return ventas.filter((v) => v.procesadorId === u.id).map((v) => ventaFila(v, PROCESADOR));
+    if (u.rol === "ENCARGADO") {
+      const eq = equipoDe(u.id);
+      return ventas.filter((v) => eq.has(v.callerId) || (v.lead?.cargadoPorId && eq.has(v.lead.cargadoPorId))).map((v) => ventaFila(v, ENCARGADO));
+    }
+    return [];
+  };
+
   const filas = usuarios
     .filter((u) => u.rol !== "ADMIN")
     .map((u) => {
       const r = resumen.get(u.id) ?? { comision: 0, fijo: 0, bono: 0, operaciones: 0, validadas: 0 };
       const ganado = r.comision + r.fijo + r.bono;
       const pagado = pagos.filter((p) => p.usuarioId === u.id).reduce((n, p) => n + p.monto, 0);
+      const equipo = u.rol === "ENCARGADO" ? usuarios.filter((x) => x.encargadoId === u.id).map((x) => ({ nombre: x.nombre, rol: x.rol })) : [];
       return {
         id: u.id, nombre: u.nombre, usuario: u.usuario, rol: u.rol, activo: u.activo,
         ...r, ganado, pagado, saldo: ganado - pagado,
         ultimoPago: pagos.find((p) => p.usuarioId === u.id)?.creadoEn ?? null,
+        detalle: detalleDe(u), equipo,
       };
     })
     .filter((f) => f.ganado > 0 || f.pagado > 0)

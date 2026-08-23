@@ -1852,6 +1852,7 @@ function Finanzas() {
 function Pagar({ trabajadores, alPagar }: { trabajadores: any[]; alPagar: (b: any) => void }) {
   const conSaldo = trabajadores.filter((t) => t.saldo > 0.5);
   const [montos, setMontos] = useState<Record<string, string>>({});
+  const [verPre, setVerPre] = useState<any>(null);
   const [metodo, setMetodo] = useState("Efectivo");
   const [nota, setNota] = useState("");
   const [msg, setMsg] = useState("");
@@ -1876,6 +1877,7 @@ function Pagar({ trabajadores, alPagar }: { trabajadores: any[]; alPagar: (b: an
 
   return (
     <div className="tarjeta">
+      {verPre && <PredPago persona={verPre} cerrar={() => setVerPre(null)} />}
       <h2>Pagar al equipo</h2>
       <p className="sub">
         Podés pagar cualquier día y cuantas veces quieras: el sistema lleva el saldo. Por defecto viene cargado
@@ -1883,7 +1885,7 @@ function Pagar({ trabajadores, alPagar }: { trabajadores: any[]; alPagar: (b: an
       </p>
 
       <div className="tabla-scroll" style={{ marginTop: 14 }}><table><tbody>
-        <tr><th>Persona</th><th>Rol</th><th>Ganado</th><th>Ya pagado</th><th>Saldo</th><th style={{ width: 150 }}>A pagar ahora</th></tr>
+        <tr><th>Persona</th><th>Rol</th><th>Ganado</th><th>Ya pagado</th><th>Saldo</th><th style={{ width: 150 }}>A pagar ahora</th><th /></tr>
         {conSaldo.map((t) => (
           <tr key={t.id}>
             <td><b>{t.nombre}</b><br /><span className="mono sub">{t.usuario}</span></td>
@@ -1896,9 +1898,10 @@ function Pagar({ trabajadores, alPagar }: { trabajadores: any[]; alPagar: (b: an
                      value={montos[t.id] ?? t.saldo.toFixed(2)}
                      onChange={(e) => setMontos({ ...montos, [t.id]: e.target.value.replace(/[^\d.]/g, "") })} />
             </td>
+            <td><button className="btn chico sec" onClick={() => setVerPre(t)}>Ver detalle</button></td>
           </tr>
         ))}
-        {!conSaldo.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>Nadie tiene saldo pendiente. Todo al día. 👌</td></tr>}
+        {!conSaldo.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Nadie tiene saldo pendiente. Todo al día. 👌</td></tr>}
       </tbody></table></div>
 
       {!!conSaldo.length && (
@@ -1971,6 +1974,106 @@ function Boleta({ datos, cerrar }: { datos: any; cerrar: () => void }) {
 
         <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
           <button className="btn" style={{ flex: 1 }} onClick={() => window.print()}>Imprimir o guardar PDF</button>
+          <button className="btn sec" onClick={cerrar}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* Pre-pago: el detalle completo del trabajo de una persona, listo para PDF. */
+function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) {
+  const hoy = new Date().toLocaleDateString("es-PE", { day: "2-digit", month: "long", year: "numeric" });
+  const fecha = (iso: string) => new Date(iso).toLocaleDateString("es-PE", { day: "2-digit", month: "2-digit" });
+  const detalle = t.detalle ?? [];
+  const validadas = detalle.filter((v: any) => v.validada);
+
+  // Etiquetas según el rol.
+  const cfgs: Record<string, { titulo: string; col: string; muestra: string }> = {
+    CALLER:    { titulo: "clientes que aceptaron", col: "Cliente", muestra: "caller" },
+    CARGADOR:  { titulo: "ventas generadas por tu data", col: "Cliente", muestra: "spamer" },
+    PROCESADOR:{ titulo: "pagos procesados", col: "Cliente", muestra: "proc" },
+    ENCARGADO: { titulo: "ventas de tu equipo", col: "Cliente", muestra: "equipo" },
+  };
+  const cfg = cfgs[t.rol] ?? { titulo: "operaciones", col: "Cliente", muestra: "" };
+
+  return (
+    <div className="velo" onClick={cerrar}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+        <div id="boleta">
+          <div style={{ textAlign: "center", borderBottom: "2px solid var(--linea)", paddingBottom: 12 }}>
+            <h2 style={{ fontSize: 22 }}>LIMA LIMÓN</h2>
+            <p className="sub">Detalle de trabajo y liquidación</p>
+            <p className="mono" style={{ fontSize: 13 }}>{hoy}</p>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <span className="rotulo">Trabajador</span>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{t.nombre}</div>
+              <div className="sub">{ROL[t.rol] ?? t.rol}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <span className="rotulo">Saldo a pagar hoy</span>
+              <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: "var(--acepto)" }}>{soles(t.saldo)}</div>
+            </div>
+          </div>
+
+          {t.rol === "ENCARGADO" && !!t.equipo?.length && (
+            <p className="sub" style={{ marginTop: 8 }}>Equipo a cargo: {t.equipo.map((x: any) => x.nombre).join(", ")}</p>
+          )}
+
+          <h3 style={{ marginTop: 18, fontSize: 15 }}>Detalle de {cfg.titulo} ({detalle.length})</h3>
+          <table style={{ marginTop: 6 }}><tbody>
+            <tr>
+              <th>Fecha</th><th>{cfg.col}</th><th>DNI</th>
+              {cfg.muestra === "spamer" && <th>Caller</th>}
+              {cfg.muestra === "equipo" && <th>Caller</th>}
+              {cfg.muestra === "caller" && <th>Spamer</th>}
+              <th style={{ textAlign: "right" }}>Monto</th><th>Estado</th>
+            </tr>
+            {detalle.map((v: any, i: number) => (
+              <tr key={i} style={{ opacity: v.validada ? 1 : 0.6 }}>
+                <td className="mono">{fecha(v.fecha)}</td>
+                <td>{v.cliente}</td>
+                <td className="mono">{v.dni}</td>
+                {(cfg.muestra === "spamer" || cfg.muestra === "equipo") && <td>{v.caller}</td>}
+                {cfg.muestra === "caller" && <td>{v.spamer}</td>}
+                <td className="mono" style={{ textAlign: "right" }}>{soles(v.monto)}</td>
+                <td>{v.validada ? "✓ validada" : "en revisión"}</td>
+              </tr>
+            ))}
+            {!detalle.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>Sin operaciones registradas.</td></tr>}
+          </tbody></table>
+
+          <h3 style={{ marginTop: 18, fontSize: 15 }}>Cómo se calcula tu pago</h3>
+          <table style={{ marginTop: 6 }}><tbody>
+            {t.rol !== "PROCESADOR" && t.rol !== "ENCARGADO" ? (
+              <>
+                <tr><td>Ventas / data validada</td><td className="mono" style={{ textAlign: "right" }}>{validadas.length} de {detalle.length}</td></tr>
+                <tr><td>Comisión (% sobre lo vendido validado)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.comision)}</td></tr>
+                <tr><td>Pago fijo (S/ 10 × {t.validadas} validada(s))</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.fijo)}</td></tr>
+                <tr><td>Bono “El cielo es el límite”</td><td className="mono" style={{ textAlign: "right" }}>{t.bono ? soles(t.bono) : "—"}</td></tr>
+              </>
+            ) : (
+              <tr><td>Comisión ({t.rol === "PROCESADOR" ? "10% de lo procesado" : "10% de las ventas del equipo"})</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.comision)}</td></tr>
+            )}
+            <tr style={{ fontWeight: 700 }}><td>Total ganado</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.ganado)}</td></tr>
+            <tr><td>Ya cobrado antes</td><td className="mono" style={{ textAlign: "right" }}>− {soles(t.pagado)}</td></tr>
+            <tr style={{ background: "#F6F9F3", fontWeight: 700 }}>
+              <td>SALDO A PAGAR HOY</td>
+              <td className="mono" style={{ textAlign: "right", fontSize: 16, color: "var(--acepto)" }}>{soles(t.saldo)}</td>
+            </tr>
+          </tbody></table>
+
+          <p className="sub" style={{ marginTop: 14, textAlign: "center" }}>
+            Solo cuentan las ventas validadas. Documento interno de control, no es comprobante de pago electrónico.
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button className="btn" style={{ flex: 1 }} onClick={() => window.print()}>Descargar PDF / Imprimir</button>
           <button className="btn sec" onClick={cerrar}>Cerrar</button>
         </div>
       </div>
