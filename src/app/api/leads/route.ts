@@ -63,9 +63,12 @@ export async function POST(req: Request) {
       const nombre = String(f.nombre ?? "").trim();
       const dni = String(f.dni ?? "").trim();
       const telefono = String(f.telefono ?? "").trim();
+      const dispositivo = String(f.dispositivo ?? "").trim();
+      const usuarioDisp = String(f.usuarioDisp ?? "").trim();
       if (!nombre) { rechazados.push("(sin nombre): falta el nombre"); continue; }
       if (digitos(dni).length < 6) { rechazados.push(`${nombre}: DNI inválido o vacío`); continue; }
       if (digitos(telefono).length < 6) { rechazados.push(`${nombre}: teléfono inválido o vacío`); continue; }
+      if (!dispositivo) { rechazados.push(`${nombre}: falta indicar desde qué dispositivo se le escribió`); continue; }
       // El DNI puede repetirse (misma persona, otro teléfono). Lo único que no se repite es el número.
       if (await db.lead.findUnique({ where: { telefono } })) { rechazados.push(`${nombre}: ese teléfono ya está cargado`); continue; }
       // La asignación es obligatoria: cada ficha nace con dueño.
@@ -86,6 +89,7 @@ export async function POST(req: Request) {
       const lead = await db.lead.create({
         data: {
           nombre, dni, telefono, nota: f.nota || null,
+          dispositivo, usuarioDisp: usuarioDisp || null,
           cargadoPorId: s.id, asignadoAId: destinoId,
         },
       });

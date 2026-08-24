@@ -62,6 +62,8 @@ model Lead {
   dni           String     // puede repetirse: la misma persona con dos teléfonos
   telefono      String     @unique
   nota          String?
+  dispositivo   String?    // desde qué equipo/línea el spamer le escribió al cliente
+  usuarioDisp   String?    // qué usuario/cuenta de ese dispositivo se usó
   estado        EstadoLead @default(PENDIENTE)
   intentos      Int        @default(0)
   proximoAviso  DateTime?

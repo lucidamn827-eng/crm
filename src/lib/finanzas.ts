@@ -6,6 +6,7 @@ export const PRIMERO = 0.12;
 export const PROCESADOR = 0.10;
 export const ENCARGADO = 0.10;
 export const POR_VALIDADA = 10;   // soles por venta validada (caller y spamer)
+export const MIN_VENTAS_DIA = 5;  // el caller necesita 5+ ventas validadas EN EL DÍA para cobrar sus S/10 de ese día
 export const INVERSION = 0.20;    // 20% de inversión inicial sobre lo vendido
 
 const zona = () => process.env.TZ_OPERACION ?? "America/Lima";
@@ -81,6 +82,8 @@ export async function devengado() {
   const anterior = (sem: string) => semanas[semanas.indexOf(sem) - 1] ?? null;
 
   const resumen = new Map<string, { comision: number; fijo: number; bono: number; operaciones: number; validadas: number }>();
+  // Desglose por día del caller: cuántas validó y si ese día llegó al mínimo de 5.
+  const diasCaller = new Map<string, { dia: string; validadas: number; paga: boolean }[]>();
   const sumar = (id: string | null | undefined, campo: "comision" | "fijo" | "bono", valor: number, ops = 0, val = 0) => {
     if (!id || !valor && !ops && !val) return;
     const r = resumen.get(id) ?? { comision: 0, fijo: 0, bono: 0, operaciones: 0, validadas: 0 };
@@ -95,14 +98,36 @@ export async function devengado() {
     const callerCampeones = prev ? campeonCaller.get(prev) : null;
     const spamerCampeones = prev ? campeonSpamer.get(prev) : null;
 
+    // Cuenta las validadas del caller SOLO en los días que llegaron a MIN_VENTAS_DIA.
+    // Los S/10 se pagan por esas; los días con menos de 5 no pagan fijo.
+    const validadasQuePagan = (ventas: any[]) => {
+      const porDia = new Map<string, number>();
+      ventas.filter((v) => v.validada).forEach((v) => {
+        const d = diaDe(v.creadoEn);
+        porDia.set(d, (porDia.get(d) ?? 0) + 1);
+      });
+      let pagan = 0;
+      porDia.forEach((n) => { if (n >= MIN_VENTAS_DIA) pagan += n; });
+      return pagan;
+    };
+
     for (const u of usuarios) {
       if (u.rol === "CALLER") {
         const mias = vSem.filter((v) => v.callerId === u.id);
         if (!mias.length) continue;
         const vendido = mias.reduce((n, v) => n + (v.monto ?? 0), 0);
         const validadas = mias.filter((v) => v.validada).length;
+        const fijoValidadas = validadasQuePagan(mias); // solo días con 5+
+        // Guardo el detalle por día para mostrárselo en el pre-pago.
+        const porDiaCaller = new Map<string, number>();
+        mias.filter((v) => v.validada).forEach((v) => {
+          const dd = diaDe(v.creadoEn); porDiaCaller.set(dd, (porDiaCaller.get(dd) ?? 0) + 1);
+        });
+        const desglose = [...porDiaCaller.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+          .map(([dia, validadas]) => ({ dia, validadas, paga: validadas >= MIN_VENTAS_DIA }));
+        diasCaller.set(u.id, [...(diasCaller.get(u.id) ?? []), ...desglose]);
         sumar(u.id, "comision", vendido * (callerCampeones?.has(u.id) ? PRIMERO : BASE), mias.length, validadas);
-        sumar(u.id, "fijo", validadas * POR_VALIDADA);
+        sumar(u.id, "fijo", fijoValidadas * POR_VALIDADA);
         sumar(u.id, "bono", bonoDe("CALLER", mias.length));
       } else if (u.rol === "CARGADOR") {
         const subidas = lSem.filter((l) => l.cargadoPorId === u.id).length;
@@ -163,6 +188,8 @@ export async function devengado() {
         ...r, ganado, pagado, saldo: ganado - pagado,
         ultimoPago: pagos.find((p) => p.usuarioId === u.id)?.creadoEn ?? null,
         detalle: detalleDe(u), equipo,
+        diasFijo: diasCaller.get(u.id) ?? [],
+        minVentasDia: MIN_VENTAS_DIA,
       };
     })
     .filter((f) => f.ganado > 0 || f.pagado > 0)

@@ -20,8 +20,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     }
 
     const permitidos = s.rol === "ADMIN"
-      ? ["nombre", "dni", "telefono", "nota", "asignadoAId", "estado"]
-      : ["nombre", "dni", "telefono", "nota"];
+      ? ["nombre", "dni", "telefono", "nota", "dispositivo", "usuarioDisp", "asignadoAId", "estado"]
+      : ["nombre", "dni", "telefono", "nota", "dispositivo", "usuarioDisp"];
     const data: any = {};
     for (const k of permitidos) if (b[k] !== undefined && b[k] !== "") data[k] = b[k];
     if (b.liberar && s.rol === "ADMIN") data.enLlamadaDesde = null;

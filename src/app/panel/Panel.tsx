@@ -9,7 +9,7 @@ import type { Rol } from "@/lib/auth";
 type Sesion = { id: string; usuario: string; nombre: string; rol: Rol };
 type Lead = {
   id: number; nombre: string; dni: string; telefono: string; nota?: string | null;
-  estado: string; intentos: number; enLlamadaDesde?: string | null; creadoEn?: string;
+  estado: string; intentos: number; enLlamadaDesde?: string | null; creadoEn?: string; dispositivo?: string | null; usuarioDisp?: string | null;
   asignadoA: { nombre: string }; asignadoAId: string; cargadoPor: { nombre: string };
   llamadas: { nota?: string | null; creadoEn: string }[];
 };
@@ -379,6 +379,7 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
+              <td>{l.dispositivo ? <span title={l.usuarioDisp ? `Usuario: ${l.usuarioDisp}` : undefined}>{l.dispositivo}{l.usuarioDisp ? ` · ${l.usuarioDisp}` : ""}</span> : "—"}</td>
               <td>{l.cargadoPor?.nombre ?? "—"}</td>
               <td><span className="eti" style={{ color: eti(l.estado).color, borderColor: eti(l.estado).color }}>{eti(l.estado).txt}</span></td>
               <td className="mono">{l.intentos}</td>
@@ -459,9 +460,21 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
   const enLlamada = leads.filter((l) => l.enLlamadaDesde);
   useTicker(true);
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
+  const [libres, setLibres] = useState<any>({ callers: [], libresAhora: [] });
+  useEffect(() => {
+    const traer = () => fetch("/api/asistencia?dias=1").then((r) => (r.ok ? r.json() : null)).then((d) => d && setLibres(d));
+    traer(); const t = setInterval(traer, 60000); return () => clearInterval(t);
+  }, []);
+  const estadoVivo = (id: string) => libres.callers?.find((c: any) => c.id === id);
 
   return (
     <>
+      {libres.libresAhora?.length > 0 && (
+        <div className="tarjeta" style={{ borderLeft: "5px solid var(--noquiso)", background: "#FDEDEC", marginBottom: 12 }}>
+          <b style={{ color: "var(--noquiso)" }}>🔴 Conectados sin llamar: {libres.libresAhora.join(", ")}</b>
+          <p className="sub" style={{ marginTop: 2 }}>Están en el sistema pero llevan rato sin marcar. Avisá al encargado.</p>
+        </div>
+      )}
       <div className="grid4">
         <div className="metrica"><span className="rotulo">Callers en llamada</span><b>{enLlamada.length}</b></div>
         <div className="metrica"><span className="rotulo">Callers libres</span><b>{callers.length - enLlamada.length}</b></div>
@@ -480,9 +493,13 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
               <tr key={c.id}>
                 <td><b>{c.nombre}</b></td>
                 <td>
-                  <span className="eti" style={{ color: l ? "var(--acepto)" : "var(--tinta2)", borderColor: l ? "var(--acepto)" : "var(--linea)" }}>
-                    {l ? "● En llamada" : "Libre"}
-                  </span>
+                  {(() => {
+                    const ev = estadoVivo(c.id);
+                    if (l) return <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>● En llamada</span>;
+                    if (ev?.callLibre) return <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>⚠ conectado sin llamar</span>;
+                    if (ev?.activoAhora) return <span className="eti" style={{ color: "var(--ambar)", borderColor: "var(--ambar)" }}>entre llamadas</span>;
+                    return <span className="eti" style={{ color: "var(--tinta2)", borderColor: "var(--linea)" }}>desconectado</span>;
+                  })()}
                 </td>
                 <td>{l ? `${l.nombre} (DNI ${l.dni})` : "—"}</td>
                 <td>{l?.cargadoPor?.nombre ?? "—"}</td>
@@ -505,10 +522,9 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
 
 /* ============ CARGA DE CONTACTOS ============ */
 function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => void }) {
-  const vacio = { nombre: "", dni: "", telefono: "", nota: "", asignadoA: "" };
+  const vacio = { nombre: "", dni: "", telefono: "", nota: "", asignadoA: "", dispositivo: "", usuarioDisp: "" };
   const [f, setF] = useState(vacio);
   const [msg, setMsg] = useState<any>(null);
-  const [masivo, setMasivo] = useState(""), [destinoMasivo, setDestinoMasivo] = useState("");
   const [carga, setCarga] = useState<any[]>([]);
   const [limite, setLimite] = useState(20);
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
@@ -533,7 +549,7 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
     await fetch("/api/carga", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callerId }) });
     setMsg({ ok: "Pedido enviado al administrador. Te avisará cuando lo apruebe." });
   }
-  const faltan = !f.nombre.trim() || num(f.dni).length < 6 || num(f.telefono).length < 6 || !f.asignadoA;
+  const faltan = !f.nombre.trim() || num(f.dni).length < 6 || num(f.telefono).length < 6 || !f.asignadoA || !f.dispositivo.trim();
 
   async function enviar(cuerpo: any) {
     const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
@@ -560,6 +576,14 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
           <div>
             <label>Teléfono <b style={{ color: "var(--noquiso)" }}>*</b></label>
             <input className="mono" inputMode="tel" value={f.telefono} onChange={(e) => setF({ ...f, telefono: e.target.value })} placeholder="Ej: 987 654 321" />
+          </div>
+          <div>
+            <label>Dispositivo desde el que se le escribió <b style={{ color: "var(--noquiso)" }}>*</b></label>
+            <input value={f.dispositivo} onChange={(e) => setF({ ...f, dispositivo: e.target.value })} placeholder="Ej: Samsung A10 - línea Claro 2" />
+          </div>
+          <div>
+            <label>Usuario/cuenta de ese dispositivo</label>
+            <input value={f.usuarioDisp} onChange={(e) => setF({ ...f, usuarioDisp: e.target.value })} placeholder="Ej: WhatsApp Business 2 (opcional)" />
           </div>
           <div>
             <label>Caller asignado <b style={{ color: "var(--noquiso)" }}>*</b></label>
@@ -598,35 +622,9 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         {msg?.rechazados?.length > 0 && <div className="error">Rechazados: {msg.rechazados.join(" · ")}</div>}
         {msg?.avisos?.length > 0 && <div className="tip">{msg.avisos.join(" · ")}</div>}
         <button className="btn" style={{ marginTop: 14 }} disabled={faltan}
-                onClick={() => { enviar(f); setF({ ...vacio, asignadoA: f.asignadoA }); }}>
-          {faltan ? "Completá nombre, DNI, teléfono y caller" : "Guardar y avisar"}
+                onClick={() => { enviar(f); setF({ ...vacio, asignadoA: f.asignadoA, dispositivo: f.dispositivo, usuarioDisp: f.usuarioDisp }); }}>
+          {faltan ? "Completá nombre, DNI, teléfono, dispositivo y caller" : "Guardar y avisar"}
         </button>
-      </div>
-
-      <div className="tarjeta">
-        <h2>Carga masiva</h2>
-        <p className="sub">Una línea por persona: <span className="mono">nombre, DNI, teléfono, nota</span></p>
-        <p className="sub">Se puede cargar la misma persona con distintos teléfonos; lo que no se repite es el número.</p>
-        <label>Caller que recibe toda esta lista <b style={{ color: "var(--noquiso)" }}>*</b></label>
-        <select value={destinoMasivo} onChange={(e) => setDestinoMasivo(e.target.value)}>
-          <option value="">Elegí el caller…</option>
-          {callers.map((c) => <option key={c.id} value={c.id}>{etiquetaCaller(c)}</option>)}
-        </select>
-        {destinoMasivo && estadoDe(destinoMasivo) && (
-          <p className="sub">Le quedan <b>{Math.max(0, estadoDe(destinoMasivo)!.tope - estadoDe(destinoMasivo)!.hoy)}</b> espacios hoy. Lo que pase del tope se rechaza solo.</p>
-        )}
-        <label style={{ marginTop: 10 }}>Pegá acá tu lista</label>
-        <textarea className="mono" style={{ minHeight: 130 }} value={masivo} onChange={(e) => setMasivo(e.target.value)}
-                  placeholder={"Carla Méndez, 45868665, 987654321, pidió info\nJulián Ríos, 40912233, 912345678"} />
-        <div className="tip">
-          Podés pegar directo desde una planilla: cada fila se convierte en un contacto. Los que tengan DNI o teléfono
-          repetido se descartan solos y te los listo abajo.
-        </div>
-        <button className="btn sec" style={{ marginTop: 12 }} disabled={!destinoMasivo || !masivo.trim()} onClick={() => {
-          const contactos = masivo.split("\n").map((l) => l.split(/[,;\t]/).map((t) => t.trim())).filter((p) => p[0])
-            .map(([nombre, dni, telefono, ...resto]) => ({ nombre, dni, telefono, nota: resto.join(", "), asignadoA: destinoMasivo }));
-          enviar({ contactos }); setMasivo("");
-        }}>{destinoMasivo ? `Cargar ${masivo.split("\n").filter((l) => l.trim()).length} contacto(s)` : "Elegí el caller primero"}</button>
       </div>
 
     </>
@@ -655,6 +653,9 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
     const nombre = limpiar(l.nombre);
     // Todas las palabras tienen que estar en el nombre, en cualquier orden.
     if (palabras.length && palabras.every((p) => nombre.includes(p))) return true;
+    // También busca por dispositivo / usuario del dispositivo.
+    const disp = limpiar(`${l.dispositivo ?? ""} ${l.usuarioDisp ?? ""}`);
+    if (palabras.length && palabras.every((p) => disp.includes(p))) return true;
     // Solo comparo contra números si escribió al menos un dígito.
     if (digitos) {
       if ((l.dni ?? "").includes(digitos)) return true;
@@ -674,11 +675,11 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
 
   function abrir(l: Lead) {
     setEdit(l);
-    setForm({ nombre: l.nombre, dni: l.dni, telefono: l.telefono, nota: l.nota ?? "", asignadoAId: l.asignadoAId, estado: l.estado });
+    setForm({ nombre: l.nombre, dni: l.dni, telefono: l.telefono, nota: l.nota ?? "", dispositivo: l.dispositivo ?? "", usuarioDisp: l.usuarioDisp ?? "", asignadoAId: l.asignadoAId, estado: l.estado });
   }
   async function guardar() {
     const cuerpo = editable === "admin" ? form
-      : { nombre: form.nombre, dni: form.dni, telefono: form.telefono, nota: form.nota };
+      : { nombre: form.nombre, dni: form.dni, telefono: form.telefono, nota: form.nota, dispositivo: form.dispositivo, usuarioDisp: form.usuarioDisp };
     const r = await fetch(`/api/leads/${edit!.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
     const d = await r.json();
     if (!r.ok) return setMsg(d.error ?? "No se pudo guardar.");
@@ -702,6 +703,8 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               <div><label>Nombre</label><input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} /></div>
               <div><label>DNI</label><input className="mono" value={form.dni} onChange={(e) => setForm({ ...form, dni: e.target.value })} /></div>
               <div><label>Teléfono</label><input className="mono" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} /></div>
+              <div><label>Dispositivo</label><input value={form.dispositivo} onChange={(e) => setForm({ ...form, dispositivo: e.target.value })} placeholder="Desde qué equipo/línea" /></div>
+              <div><label>Usuario del dispositivo</label><input value={form.usuarioDisp} onChange={(e) => setForm({ ...form, usuarioDisp: e.target.value })} placeholder="Opcional" /></div>
               {editable === "admin" && (
                 <>
                   <div><label>Caller asignado</label>
@@ -765,7 +768,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
         {editable === "spamer" && <p className="sub">Podés corregir o borrar una ficha mientras el caller no la haya llamado todavía.</p>}
         <div className="tabla-scroll"><table><tbody>
           <tr>
-            <th>Ficha</th><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
+            <th>Ficha</th><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Dispositivo</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
           </tr>
           {filtrados.map((l) => (
             <tr key={l.id}>
@@ -774,6 +777,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
+              <td>{l.dispositivo ? <span title={l.usuarioDisp ? `Usuario: ${l.usuarioDisp}` : undefined}>{l.dispositivo}{l.usuarioDisp ? ` · ${l.usuarioDisp}` : ""}</span> : "—"}</td>
               <td>{l.cargadoPor?.nombre ?? "—"}</td>
               <td>{l.asignadoA?.nombre ?? "—"}</td>
               <td>
@@ -792,7 +796,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
               )}
             </tr>
           ))}
-          {!filtrados.length && <tr><td colSpan={editable ? 11 : 10} style={{ color: "var(--tinta2)" }}>
+          {!filtrados.length && <tr><td colSpan={editable ? 12 : 11} style={{ color: "var(--tinta2)" }}>
             {leads.length ? "Ningún contacto coincide con la búsqueda." : "Todavía no hay contactos cargados."}
           </td></tr>}
         </tbody></table></div>
@@ -954,7 +958,7 @@ function Avisos() {
 function Supervision() {
   const [d, setD] = useState<any>(null);
   const [dias, setDias] = useState(7);
-  const [tab, setTab] = useState<"equipo" | "spamers" | "alertas" | "bitacora">("equipo");
+  const [tab, setTab] = useState<"equipo" | "spamers" | "asistencia" | "alertas" | "bitacora">("equipo");
   const [carga, setCarga] = useState<any>(null);
 
   const traerCarga = useCallback(() => {
@@ -1047,7 +1051,7 @@ function Supervision() {
           </button>
         ))}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {([["equipo", "Callers"], ["spamers", "Spamers"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
+          {([["equipo", "Callers"], ["spamers", "Spamers"], ["asistencia", "Asistencia"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
             <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
           ))}
         </span>
@@ -1223,6 +1227,8 @@ function Supervision() {
           </tbody></table></div>
         </div>
       )}
+
+      {tab === "asistencia" && <Asistencia />}
 
       {tab === "bitacora" && (
         <div className="tarjeta">
@@ -1660,7 +1666,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
         <div className="tarjeta">
           <h2>A pagar por persona</h2>
           <p className="sub">
-            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta validada {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}.
+            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta (callers: solo días con 5+ ventas) {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}.
           </p>
           <div className="tabla-scroll"><table><tbody>
             <tr><th>Persona</th><th>Rol</th><th>Concepto</th><th>Operaciones</th><th>Base</th><th>%</th><th>Comisión</th><th>Validadas</th><th>S/ 10 c/u</th><th>Bono</th><th>Total</th></tr>
@@ -2146,7 +2152,7 @@ function Boleta({ datos, cerrar }: { datos: any; cerrar: () => void }) {
                 <td>{ROL[l.rol] ?? l.rol}</td>
                 <td className="sub">
                   {l.comision > 0 && <>comisión {soles(l.comision)}<br /></>}
-                  {l.fijo > 0 && <>{l.validadas} validada(s) × S/ 10 = {soles(l.fijo)}<br /></>}
+                  {l.fijo > 0 && <>{l.validadas} validada(s) → fijo {soles(l.fijo)} (callers: solo días con 5+ ventas)<br /></>}
                   {l.bono > 0 && <>bonos {soles(l.bono)}<br /></>}
                   {l.pagado < l.saldo && <b>queda pendiente {soles(l.saldo - l.pagado)}</b>}
                 </td>
@@ -2246,7 +2252,7 @@ function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) 
               <>
                 <tr><td>Ventas / data validada</td><td className="mono" style={{ textAlign: "right" }}>{validadas.length} de {detalle.length}</td></tr>
                 <tr><td>Comisión (% sobre lo vendido validado)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.comision)}</td></tr>
-                <tr><td>Pago fijo (S/ 10 × {t.validadas} validada(s))</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.fijo)}</td></tr>
+                <tr><td>Pago fijo (S/ 10 por venta, solo días con {t.minVentasDia ?? 5}+ ventas)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.fijo)}</td></tr>
                 <tr><td>Bono “El cielo es el límite”</td><td className="mono" style={{ textAlign: "right" }}>{t.bono ? soles(t.bono) : "—"}</td></tr>
               </>
             ) : (
@@ -2259,6 +2265,23 @@ function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) 
               <td className="mono" style={{ textAlign: "right", fontSize: 16, color: "var(--acepto)" }}>{soles(t.saldo)}</td>
             </tr>
           </tbody></table>
+
+          {t.rol === "CALLER" && !!t.diasFijo?.length && (
+            <>
+              <h3 style={{ marginTop: 18, fontSize: 15 }}>Fijo por día (mínimo {t.minVentasDia ?? 5} ventas para cobrarlo)</h3>
+              <table style={{ marginTop: 6 }}><tbody>
+                <tr><th>Día</th><th style={{ textAlign: "right" }}>Ventas validadas</th><th style={{ textAlign: "right" }}>Fijo</th></tr>
+                {t.diasFijo.map((d: any) => (
+                  <tr key={d.dia} style={{ opacity: d.paga ? 1 : 0.55 }}>
+                    <td className="mono">{new Date(d.dia + "T12:00:00").toLocaleDateString("es", { day: "2-digit", month: "2-digit" })}</td>
+                    <td className="mono" style={{ textAlign: "right", color: d.paga ? "var(--acepto)" : "var(--noquiso)" }}>{d.validadas}{d.paga ? "" : ` (faltó para ${t.minVentasDia ?? 5})`}</td>
+                    <td className="mono" style={{ textAlign: "right" }}>{d.paga ? soles(d.validadas * 10) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+              <p className="sub" style={{ marginTop: 6 }}>Los días con menos de {t.minVentasDia ?? 5} ventas no pagan el fijo de S/10 (la comisión del 10% sí se cobra igual).</p>
+            </>
+          )}
 
           <p className="sub" style={{ marginTop: 14, textAlign: "center" }}>
             Solo cuentan las ventas validadas. Documento interno de control, no es comprobante de pago electrónico.
@@ -2639,5 +2662,79 @@ function AjustesTab({ saldoInicial, metaAhorro, recargar }: { saldoInicial: numb
       {msg && <div className="ok">{msg}</div>}
       <button className="btn" style={{ marginTop: 14 }} onClick={guardar}>Guardar ajustes</button>
     </div>
+  );
+}
+
+/* ============ ASISTENCIA Y CALL LIBRE (admin / encargado) ============ */
+function Asistencia() {
+  const [d, setD] = useState<any>(null);
+  const [dias, setDias] = useState(7);
+  const [abierto, setAbierto] = useState<string | null>(null);
+  const traer = useCallback(() => {
+    fetch(`/api/asistencia?dias=${dias}`).then((r) => (r.ok ? r.json() : null)).then(setD);
+  }, [dias]);
+  useEffect(() => { traer(); const t = setInterval(traer, 60000); return () => clearInterval(t); }, [traer]);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  return (
+    <>
+      {d.libresAhora.length > 0 && (
+        <div className="tarjeta" style={{ borderLeft: "5px solid var(--noquiso)", background: "#FDEDEC" }}>
+          <b style={{ color: "var(--noquiso)" }}>🔴 Conectados pero sin llamar ahora ({d.libresAhora.length})</b>
+          <p className="sub" style={{ marginTop: 4 }}>Están logueados pero llevan {d.libreMin}+ min sin marcar ninguna llamada: {d.libresAhora.join(", ")}. Un toque al encargado y a mover.</p>
+        </div>
+      )}
+
+      <div className="tarjeta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span className="rotulo">Entrada esperada: {d.horaEntrada} (+{d.tolerancia} min de gracia)</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {[7, 15, 30].map((n) => <button key={n} className={`btn chico ${dias === n ? "" : "sec"}`} onClick={() => setDias(n)}>{n} días</button>)}
+        </span>
+      </div>
+
+      <div className="tarjeta">
+        <h2>Resumen por caller · últimos {dias} días</h2>
+        <div className="tabla-scroll"><table><tbody>
+          <tr><th>Caller</th><th>Estado</th><th style={{ textAlign: "right" }}>Entrada promedio</th><th style={{ textAlign: "right" }}>Tardanzas</th><th style={{ textAlign: "right" }}>Días</th><th /></tr>
+          {d.callers.map((c: any) => (
+            <Fragment key={c.id}>
+              <tr>
+                <td><b>{c.nombre}</b></td>
+                <td>
+                  {c.callLibre ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>call libre</span>
+                    : c.activoAhora ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>trabajando</span>
+                    : <span className="sub">desconectado</span>}
+                </td>
+                <td className="mono" style={{ textAlign: "right" }}>{c.promedioEntrada}</td>
+                <td className="mono" style={{ textAlign: "right", color: c.tardanzas > 0 ? "var(--noquiso)" : "var(--acepto)" }}>{c.tardanzas}</td>
+                <td className="mono" style={{ textAlign: "right" }}>{c.diasTrabajados}</td>
+                <td><button className="btn chico sec" onClick={() => setAbierto(abierto === c.id ? null : c.id)}>{abierto === c.id ? "Ocultar" : "Ver días"}</button></td>
+              </tr>
+              {abierto === c.id && (
+                <tr><td colSpan={6} style={{ background: "var(--papel)" }}>
+                  <table><tbody>
+                    <tr><th>Día</th><th>Entrada</th><th>1ra llamada</th><th style={{ textAlign: "right" }}>Llamadas</th><th /></tr>
+                    {c.filas.map((f: any) => (
+                      <tr key={f.dia}>
+                        <td className="mono">{f.dia}</td>
+                        <td className="mono" style={{ color: f.tarde ? "var(--noquiso)" : undefined }}>{f.entrada}{f.tarde ? ` (+${f.minutosTarde}m)` : ""}</td>
+                        <td className="mono">{f.primeraLlamada}</td>
+                        <td className="mono" style={{ textAlign: "right" }}>{f.llamadas}</td>
+                        <td>{f.tarde ? "⏰ tarde" : f.entrada !== "—" ? "✓" : ""}</td>
+                      </tr>
+                    ))}
+                    {!c.filas.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Sin registros en el período.</td></tr>}
+                  </tbody></table>
+                </td></tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody></table></div>
+        <div className="tip">
+          Este registro sale del propio uso del sistema: la <b>entrada</b> es el primer ingreso al CRM del día y la <b>1ra llamada</b> es cuando empezó a trabajar de verdad.
+          Si alguien entra 9:00 pero su primera llamada es 9:40, ahí tenés la conversación para el encargado.
+        </div>
+      </div>
+    </>
   );
 }
