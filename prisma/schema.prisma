@@ -178,3 +178,43 @@ model Pago {
   @@index([usuarioId, creadoEn])
   @@index([lote])
 }
+
+/// Gastos operativos aparte de la inversión: local, minutos, equipos, publicidad, etc.
+model Gasto {
+  id        Int      @id @default(autoincrement())
+  concepto  String
+  monto     Float
+  fecha     DateTime @default(now())
+  categoria String?  // etiqueta libre opcional
+  creadoPor String
+  creadoEn  DateTime @default(now())
+
+  @@index([fecha])
+}
+
+/// ===== Finanzas personales del admin (privado, aparte del negocio) =====
+
+model MovimientoPersonal {
+  id        Int      @id @default(autoincrement())
+  tipo      String   // "ingreso" | "gasto"
+  monto     Float
+  categoria String
+  nota      String?
+  fecha     DateTime @default(now())
+  creadoEn  DateTime @default(now())
+
+  @@index([fecha])
+  @@index([tipo, categoria])
+}
+
+model PresupuestoPersonal {
+  categoria String  @id   // un tope mensual por categoría
+  limite    Float
+  color     String?
+}
+
+/// Ajustes personales: saldo inicial, meta de ahorro, etc. (clave-valor)
+model AjustePersonal {
+  clave String @id
+  valor String
+}

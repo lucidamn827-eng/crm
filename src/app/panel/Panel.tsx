@@ -50,7 +50,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     sesion.rol === "ENCARGADO" ? [["liquidacion", "💵 Mi liquidación"], ["todos", "Contactos de mi equipo"]] :
     sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
     sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
-    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["finanzas", "📊 Finanzas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
+    [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["finanzas", "📊 Finanzas"], ["meta", "🎯 Meta"], ["personal", "🔒 Mis finanzas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
 
   const marca =
     sesion.rol === "CALLER" ? { titulo: "Mesa de llamadas", color: "#14532D" } :
@@ -203,6 +203,8 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         {vista === "cielo" && <Cielo sesion={sesion} />}
         {vista === "liquidacion" && <Liquidacion sesion={sesion} usuarios={usuarios} />}
         {vista === "finanzas" && <Finanzas />}
+        {vista === "meta" && <Meta />}
+        {vista === "personal" && <Personal />}
       </main>
     </>
   );
@@ -1712,7 +1714,8 @@ function VentanaEquipo({ encargado, asignables, usuarios, cerrar, guardar }:
 /* ============ FINANZAS (solo admin) ============ */
 function Finanzas() {
   const [d, setD] = useState<any>(null);
-  const [tab, setTab] = useState<"resumen" | "pagar" | "historial">("resumen");
+  const [tab, setTab] = useState<"resumen" | "pagar" | "gastos" | "historial">("resumen");
+  const [gasto, setGasto] = useState({ concepto: "", monto: "", fecha: "", categoria: "" });
   const [desde, setDesde] = useState(""), [hasta, setHasta] = useState("");
   const [boleta, setBoleta] = useState<any>(null);
 
@@ -1734,7 +1737,7 @@ function Finanzas() {
       {boleta && <Boleta datos={boleta} cerrar={() => { setBoleta(null); traer(); }} />}
 
       <div className="tarjeta" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {([["resumen", "Resumen"], ["pagar", `Pagar (${d.trabajadores.filter((t: any) => t.saldo > 0.5).length})`], ["historial", "Historial de pagos"]] as [any, string][])
+        {([["resumen", "Resumen"], ["pagar", `Pagar (${d.trabajadores.filter((t: any) => t.saldo > 0.5).length})`], ["gastos", "Gastos"], ["historial", "Historial de pagos"]] as [any, string][])
           .map(([k, t]) => (
             <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
           ))}
@@ -1745,7 +1748,7 @@ function Finanzas() {
           <div className="grid4">
             <div className="metrica"><span className="rotulo">Vendido histórico</span><b style={{ fontSize: 21 }}>{soles(r.vendidoTotal)}</b></div>
             <div className="metrica"><span className="rotulo">Pagos al equipo</span><b style={{ fontSize: 21 }}>{soles(r.totalGanado)}</b></div>
-            <div className="metrica"><span className="rotulo">Inversión ({Math.round(r.porcentajeInversion * 100)}%)</span><b style={{ fontSize: 21 }}>{soles(r.inversion)}</b></div>
+            <div className="metrica"><span className="rotulo">Gastos operativos</span><b style={{ fontSize: 21 }}>{soles(r.operativos ?? 0)}</b></div>
             <div className="metrica">
               <span className="rotulo">Utilidad</span>
               <b style={{ fontSize: 21, color: r.utilidad >= 0 ? "var(--acepto)" : "var(--noquiso)" }}>{soles(r.utilidad)}</b>
@@ -1761,7 +1764,7 @@ function Finanzas() {
                 ["Comisiones por porcentaje", -r.comisiones, r.comisiones / (r.vendidoTotal || 1)],
                 ["Pagos fijos (S/ 10 por venta validada)", -r.fijos, r.fijos / (r.vendidoTotal || 1)],
                 ["Bonos del cielo es el límite", -r.bonos, r.bonos / (r.vendidoTotal || 1)],
-                [`Inversión inicial (${Math.round(r.porcentajeInversion * 100)}%)`, -r.inversion, r.porcentajeInversion],
+                ["Gastos operativos", -(r.operativos ?? 0), (r.operativos ?? 0) / (r.vendidoTotal || 1)],
               ].map(([txt, monto, pct]: any) => (
                 <tr key={txt}>
                   <td>{txt}</td>
@@ -1813,6 +1816,50 @@ function Finanzas() {
       )}
 
       {tab === "pagar" && <Pagar trabajadores={d.trabajadores} alPagar={setBoleta} />}
+
+      {tab === "gastos" && (
+        <div className="tarjeta">
+          <h2>Gastos operativos</h2>
+          <p className="sub">Aparte del 20% de inversión. Todo lo que cargues acá se resta de tu utilidad.</p>
+          <div className="grid4" style={{ alignItems: "end", marginTop: 6 }}>
+            <div style={{ gridColumn: "span 2" }}>
+              <label>Concepto</label>
+              <input value={gasto.concepto} onChange={(e) => setGasto({ ...gasto, concepto: e.target.value })} placeholder="Ej: recarga de minutos, alquiler, publicidad" />
+            </div>
+            <div><label>Monto (S/)</label>
+              <input className="mono" inputMode="decimal" value={gasto.monto} onChange={(e) => setGasto({ ...gasto, monto: e.target.value.replace(/[^\d.]/g, "") })} placeholder="0.00" />
+            </div>
+            <div><label>Fecha</label>
+              <input type="date" value={gasto.fecha} onChange={(e) => setGasto({ ...gasto, fecha: e.target.value })} />
+            </div>
+          </div>
+          <button className="btn" style={{ marginTop: 12 }} disabled={!gasto.concepto.trim() || !(Number(gasto.monto) > 0)}
+                  onClick={async () => {
+                    await fetch("/api/gastos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(gasto) });
+                    setGasto({ concepto: "", monto: "", fecha: "", categoria: "" }); traer();
+                  }}>Agregar gasto</button>
+
+          <div className="tabla-scroll" style={{ marginTop: 16 }}><table><tbody>
+            <tr><th>Fecha</th><th>Concepto</th><th style={{ textAlign: "right" }}>Monto</th><th /></tr>
+            {d.gastos?.map((g: any) => (
+              <tr key={g.id}>
+                <td className="mono">{new Date(g.fecha).toLocaleDateString("es", { day: "2-digit", month: "2-digit", year: "2-digit" })}</td>
+                <td>{g.concepto}</td>
+                <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: "var(--noquiso)" }}>− {soles(g.monto)}</td>
+                <td>
+                  <button className="btn chico sec" onClick={async () => {
+                    if (!confirm(`¿Eliminar el gasto "${g.concepto}" de ${soles(g.monto)}?`)) return;
+                    await fetch("/api/gastos", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: g.id }) });
+                    traer();
+                  }}>Eliminar</button>
+                </td>
+              </tr>
+            ))}
+            {!d.gastos?.length && <tr><td colSpan={4} style={{ color: "var(--tinta2)" }}>Todavía no cargaste gastos.</td></tr>}
+          </tbody></table></div>
+          {!!d.gastos?.length && <div className="tip">Total de gastos operativos: <b>{soles(d.resumen.operativos ?? 0)}</b> — ya descontados de tu utilidad.</div>}
+        </div>
+      )}
 
       {tab === "historial" && (
         <div className="tarjeta">
@@ -2077,6 +2124,374 @@ function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) 
           <button className="btn sec" onClick={cerrar}>Cerrar</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/* ============ META Y PROYECCIÓN (solo admin) ============ */
+function Meta() {
+  const [d, setD] = useState<any>(null);
+  const [editar, setEditar] = useState(false);
+  const [meta, setMeta] = useState("1000000"), [fecha, setFecha] = useState("");
+
+  const traer = useCallback(() => {
+    fetch("/api/metas").then((r) => (r.ok ? r.json() : null)).then((x) => {
+      setD(x); if (x) { setMeta(String(x.metaUtilidad)); setFecha(x.metaFecha ?? ""); }
+    });
+  }, []);
+  useEffect(() => { traer(); }, [traer]);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  async function guardar() {
+    await fetch("/api/metas", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ metaUtilidad: Number(meta), metaFecha: fecha }) });
+    setEditar(false); traer();
+  }
+
+  const pct = Math.min(100, (d.utilidadAcumulada / d.metaUtilidad) * 100);
+  const semLabel = (s: string) => new Date(s + "T12:00:00").toLocaleDateString("es", { day: "2-digit", month: "2-digit" });
+  const maxU = Math.max(...d.series.map((x: any) => x.utilidad), 1);
+
+  return (
+    <>
+      <div className="tarjeta" style={{ textAlign: "center", background: "linear-gradient(180deg,#14532D,#1B6B3A)", color: "#EAF4F6", border: 0 }}>
+        <span className="rotulo" style={{ color: "#9FC9D2" }}>Utilidad acumulada hacia la meta</span>
+        <div className="mono" style={{ fontSize: 46, fontWeight: 700, lineHeight: 1.1, margin: "4px 0" }}>{soles(d.utilidadAcumulada)}</div>
+        <p style={{ opacity: .9 }}>de {soles(d.metaUtilidad)} · {pct.toFixed(1)}%</p>
+        <div className="barra" style={{ marginTop: 12, height: 16, background: "rgba(255,255,255,.2)" }}>
+          <span style={{ width: `${pct}%`, background: "var(--lima-pulpa)" }} />
+        </div>
+      </div>
+
+      <div className="grid4">
+        <div className="metrica"><span className="rotulo">Margen real</span><b style={{ fontSize: 22, color: "var(--acepto)" }}>{Math.round(d.margenActual * 100)}%</b></div>
+        <div className="metrica"><span className="rotulo">Utilidad por semana (ritmo)</span><b style={{ fontSize: 20 }}>{soles(d.ritmoSemanal)}</b></div>
+        <div className="metrica"><span className="rotulo">Te falta</span><b style={{ fontSize: 20 }}>{soles(d.falta)}</b></div>
+        <div className="metrica">
+          <span className="rotulo">Al ritmo actual llegás en</span>
+          <b style={{ fontSize: 20 }}>{d.semanasRestantes ? `${d.semanasRestantes} sem` : "—"}</b>
+        </div>
+      </div>
+
+      {d.metaFecha && (
+        <div className="tarjeta" style={{ borderLeft: `6px solid ${d.enCamino ? "var(--acepto)" : "var(--noquiso)"}` }}>
+          <h2>{d.enCamino ? "✅ Vas en camino" : "⚠️ Vas atrasado para la fecha"}</h2>
+          <p className="sub">Meta para el {new Date(d.metaFecha).toLocaleDateString("es", { day: "2-digit", month: "long", year: "numeric" })} · quedan {d.semanasHastaFecha} semana(s).</p>
+          <div className="grid2" style={{ marginTop: 12 }}>
+            <div className="metrica">
+              <span className="rotulo">Utilidad que necesitás por semana</span>
+              <b style={{ fontSize: 22 }}>{soles(d.utilidadSemanalNecesaria)}</b>
+              <span className="sub">hoy hacés {soles(d.ritmoSemanal)}</span>
+            </div>
+            <div className="metrica">
+              <span className="rotulo">Para eso tenés que vender por semana</span>
+              <b style={{ fontSize: 22 }}>{d.ventaSemanalNecesaria ? soles(d.ventaSemanalNecesaria) : "—"}</b>
+              <span className="sub">a tu margen del {Math.round(d.margenActual * 100)}%</span>
+            </div>
+          </div>
+          {!d.enCamino && d.ritmoSemanal > 0 && (
+            <div className="tip">
+              Para llegar a tiempo necesitás casi <b>{Math.ceil(d.utilidadSemanalNecesaria / d.ritmoSemanal)}×</b> tu ritmo actual.
+              Cada punto de margen que recuperás baja la venta que necesitás: subir del {Math.round(d.margenActual * 100)}% al {Math.round(d.margenActual * 100) + 5}% te ahorra {soles(d.utilidadSemanalNecesaria / d.margenActual - d.utilidadSemanalNecesaria / (d.margenActual + 0.05))} de venta semanal.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="tarjeta">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <h2>Utilidad y margen por semana</h2>
+          <button className="btn sec chico" style={{ marginLeft: "auto" }} onClick={() => setEditar(!editar)}>
+            {editar ? "Cerrar" : "Configurar meta"}
+          </button>
+        </div>
+
+        {editar && (
+          <div className="grid2" style={{ margin: "12px 0", padding: 12, background: "var(--papel)", borderRadius: 10 }}>
+            <div><label>Meta de utilidad (S/)</label><input className="mono" value={meta} onChange={(e) => setMeta(e.target.value.replace(/[^\d]/g, ""))} /></div>
+            <div><label>Fecha objetivo</label><input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} /></div>
+            <button className="btn" style={{ gridColumn: "span 2" }} onClick={guardar}>Guardar meta</button>
+          </div>
+        )}
+
+        <div className="tabla-scroll"><table><tbody>
+          <tr><th>Semana</th><th style={{ textAlign: "right" }}>Vendido</th><th style={{ textAlign: "right" }}>Utilidad</th><th style={{ textAlign: "right" }}>Margen</th><th style={{ width: "30%" }} /></tr>
+          {[...d.series].reverse().map((x: any) => (
+            <tr key={x.semana}>
+              <td className="mono">{semLabel(x.semana)}</td>
+              <td className="mono" style={{ textAlign: "right" }}>{soles(x.vendido)}</td>
+              <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: "var(--acepto)" }}>{soles(x.utilidad)}</td>
+              <td className="mono" style={{ textAlign: "right" }}>{Math.round(x.margen * 100)}%</td>
+              <td><div className="barra"><span style={{ width: `${(x.utilidad / maxU) * 100}%` }} /></div></td>
+            </tr>
+          ))}
+          {!d.series.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Todavía no hay semanas con ventas.</td></tr>}
+        </tbody></table></div>
+        <div className="tip">
+          Vigilá la columna <b>Margen</b>: si baja mientras crecés, el crecimiento te está comiendo la ganancia.
+          Mantener el margen vale más que sumar ventas.
+        </div>
+      </div>
+    </>
+  );
+}
+
+
+/* ============ MIS FINANZAS (personal, solo el admin) ============ */
+const CAT_GASTO = ["Comida", "Transporte", "Ocio", "Compras", "Servicios", "Salud", "Hogar", "Otros"];
+
+function Personal() {
+  const [d, setD] = useState<any>(null);
+  const [tab, setTab] = useState<"panel" | "registrar" | "presupuestos" | "config">("panel");
+  const [mes, setMes] = useState("");
+  const traer = useCallback(() => {
+    fetch(`/api/personal${mes ? `?mes=${mes}` : ""}`).then((r) => (r.ok ? r.json() : null)).then(setD);
+  }, [mes]);
+  useEffect(() => { traer(); }, [traer]);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  const mesLindo = (m: string) => new Date(m + "-15").toLocaleDateString("es", { month: "long", year: "numeric" });
+
+  return (
+    <>
+      <div className="tarjeta" style={{ background: "#FEF9E7", borderLeft: "5px solid var(--ambar)" }}>
+        <b>🔒 Espacio privado.</b> Esto es tu control personal de plata, separado del negocio. Nadie del equipo lo ve.
+      </div>
+
+      {!!d.alertas.length && (
+        <div className="tarjeta" style={{ borderLeft: "5px solid var(--noquiso)", background: "#FDEDEC" }}>
+          <b style={{ color: "var(--noquiso)" }}>⚠️ Alertas de gasto</b>
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {d.alertas.map((a: any) => (
+              <li key={a.categoria}>
+                {a.excedido
+                  ? <><b>{a.categoria}</b>: te pasaste del límite ({soles(a.gastado)} de {soles(a.limite)})</>
+                  : <><b>{a.categoria}</b>: estás cerca del límite ({soles(a.gastado)} de {soles(a.limite)})</>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="tarjeta" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {([["panel", "Panel"], ["registrar", "Registrar"], ["presupuestos", "Presupuestos"], ["config", "Ajustes"]] as [any, string][])
+          .map(([k, t]) => <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>)}
+        {d.mesesDisponibles.length > 1 && (
+          <select style={{ marginLeft: "auto", width: "auto" }} value={mes || d.mes} onChange={(e) => setMes(e.target.value)}>
+            {d.mesesDisponibles.map((m: string) => <option key={m} value={m}>{mesLindo(m)}</option>)}
+          </select>
+        )}
+      </div>
+
+      {tab === "panel" && (
+        <>
+          <div className="grid4">
+            <div className="metrica"><span className="rotulo">Saldo actual</span><b style={{ fontSize: 22 }}>{soles(d.saldoActual)}</b></div>
+            <div className="metrica"><span className="rotulo">Ingresos del mes</span><b style={{ fontSize: 20, color: "var(--acepto)" }}>{soles(d.ingresosMes)}</b></div>
+            <div className="metrica"><span className="rotulo">Gastos del mes</span><b style={{ fontSize: 20, color: "var(--noquiso)" }}>{soles(d.gastosMes)}</b></div>
+            <div className="metrica">
+              <span className="rotulo">Ahorro del mes</span>
+              <b style={{ fontSize: 20, color: d.ahorroMes >= 0 ? "var(--acepto)" : "var(--noquiso)" }}>{soles(d.ahorroMes)}</b>
+            </div>
+          </div>
+
+          {d.metaAhorro > 0 && (
+            <div className="tarjeta" style={{ borderLeft: `5px solid ${d.cumpleAhorro ? "var(--acepto)" : "var(--ambar)"}` }}>
+              <b>{d.cumpleAhorro ? "✅ Vas cumpliendo tu meta de ahorro" : "🎯 Meta de ahorro del mes"}</b>
+              <p className="sub" style={{ marginTop: 4 }}>Meta: {soles(d.metaAhorro)} · llevás {soles(d.ahorroMes)}</p>
+              <div className="barra" style={{ marginTop: 8, height: 12 }}>
+                <span style={{ width: `${Math.min(100, Math.max(0, (d.ahorroMes / d.metaAhorro) * 100))}%` }} />
+              </div>
+            </div>
+          )}
+
+          <div className="tarjeta">
+            <h2>Gasto por categoría · {mesLindo(d.mes)}</h2>
+            <div className="tabla-scroll"><table><tbody>
+              <tr><th>Categoría</th><th style={{ textAlign: "right" }}>Gastado</th><th style={{ textAlign: "right" }}>Límite</th><th style={{ width: "35%" }} /></tr>
+              {d.categorias.map((c: any) => (
+                <tr key={c.categoria}>
+                  <td><b>{c.categoria}</b></td>
+                  <td className="mono" style={{ textAlign: "right", color: c.excedido ? "var(--noquiso)" : undefined }}>{soles(c.gastado)}</td>
+                  <td className="mono" style={{ textAlign: "right" }}>{c.limite ? soles(c.limite) : "—"}</td>
+                  <td>
+                    {c.limite ? (
+                      <div className="barra" title={`${c.pct}%`}>
+                        <span style={{ width: `${Math.min(100, c.pct)}%`, background: c.excedido ? "var(--noquiso)" : c.cerca ? "var(--ambar)" : "var(--acepto)" }} />
+                      </div>
+                    ) : <span className="sub">sin límite</span>}
+                  </td>
+                </tr>
+              ))}
+              {!d.categorias.length && <tr><td colSpan={4} style={{ color: "var(--tinta2)" }}>Sin gastos este mes.</td></tr>}
+            </tbody></table></div>
+          </div>
+
+          {d.tendencia.length > 1 && (
+            <div className="tarjeta">
+              <h2>Últimos meses</h2>
+              <div className="tabla-scroll"><table><tbody>
+                <tr><th>Mes</th><th style={{ textAlign: "right" }}>Ingresos</th><th style={{ textAlign: "right" }}>Gastos</th><th style={{ textAlign: "right" }}>Ahorro</th></tr>
+                {[...d.tendencia].reverse().map((t: any) => (
+                  <tr key={t.mes}>
+                    <td>{mesLindo(t.mes)}</td>
+                    <td className="mono" style={{ textAlign: "right", color: "var(--acepto)" }}>{soles(t.ingresos)}</td>
+                    <td className="mono" style={{ textAlign: "right", color: "var(--noquiso)" }}>{soles(t.gastos)}</td>
+                    <td className="mono" style={{ textAlign: "right", fontWeight: 700, color: t.ahorro >= 0 ? "var(--acepto)" : "var(--noquiso)" }}>{soles(t.ahorro)}</td>
+                  </tr>
+                ))}
+              </tbody></table></div>
+            </div>
+          )}
+
+          <div className="tarjeta">
+            <h2>Movimientos del mes</h2>
+            <div className="tabla-scroll"><table><tbody>
+              <tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Nota</th><th style={{ textAlign: "right" }}>Monto</th><th /></tr>
+              {d.movimientos.map((m: any) => (
+                <tr key={m.id}>
+                  <td className="mono">{new Date(m.fecha).toLocaleDateString("es", { day: "2-digit", month: "2-digit" })}</td>
+                  <td>{m.tipo === "ingreso" ? "🟢 Ingreso" : "🔴 Gasto"}</td>
+                  <td>{m.categoria}</td>
+                  <td className="sub">{m.nota ?? "—"}</td>
+                  <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: m.tipo === "ingreso" ? "var(--acepto)" : "var(--noquiso)" }}>
+                    {m.tipo === "ingreso" ? "+" : "−"} {soles(m.monto)}
+                  </td>
+                  <td><button className="btn chico sec" onClick={async () => {
+                    if (!confirm("¿Eliminar este movimiento?")) return;
+                    await fetch("/api/personal", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: m.id }) });
+                    traer();
+                  }}>✕</button></td>
+                </tr>
+              ))}
+              {!d.movimientos.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>Sin movimientos este mes.</td></tr>}
+            </tbody></table></div>
+          </div>
+        </>
+      )}
+
+      {tab === "registrar" && <RegistrarMov categorias={d.presupuestos.map((p: any) => p.categoria)} alGuardar={() => { traer(); setTab("panel"); }} />}
+
+      {tab === "presupuestos" && (
+        <PresupuestosTab presupuestos={d.presupuestos} categorias={d.categorias} recargar={traer} />
+      )}
+
+      {tab === "config" && (
+        <AjustesTab saldoInicial={d.saldoInicial} metaAhorro={d.metaAhorro} recargar={traer} />
+      )}
+    </>
+  );
+}
+
+function RegistrarMov({ categorias, alGuardar }: { categorias: string[]; alGuardar: () => void }) {
+  const [tipo, setTipo] = useState<"gasto" | "ingreso">("gasto");
+  const [m, setM] = useState({ monto: "", categoria: "", nota: "", fecha: "" });
+  const [msg, setMsg] = useState("");
+  const cats = [...new Set([...CAT_GASTO, ...categorias])];
+
+  async function guardar() {
+    const r = await fetch("/api/personal", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accion: "movimiento", tipo, ...m }) });
+    const res = await r.json();
+    if (!r.ok) return setMsg(res.error);
+    alGuardar();
+  }
+
+  return (
+    <div className="tarjeta">
+      <h2>Registrar movimiento</h2>
+      <div style={{ display: "flex", gap: 8, margin: "10px 0" }}>
+        <button className={`btn ${tipo === "gasto" ? "" : "sec"}`} style={{ flex: 1, background: tipo === "gasto" ? "var(--noquiso)" : undefined }} onClick={() => setTipo("gasto")}>🔴 Gasto</button>
+        <button className={`btn ${tipo === "ingreso" ? "" : "sec"}`} style={{ flex: 1, background: tipo === "ingreso" ? "var(--acepto)" : undefined }} onClick={() => setTipo("ingreso")}>🟢 Ingreso</button>
+      </div>
+      <label>Monto (S/)</label>
+      <input className="mono" inputMode="decimal" autoFocus style={{ fontSize: 24, fontWeight: 700, textAlign: "center" }}
+             value={m.monto} onChange={(e) => setM({ ...m, monto: e.target.value.replace(/[^\d.]/g, "") })} placeholder="0.00" />
+      <label>Categoría</label>
+      {tipo === "gasto" ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+          {cats.map((c) => (
+            <button key={c} type="button" className={`btn chico ${m.categoria === c ? "" : "sec"}`} onClick={() => setM({ ...m, categoria: c })}>{c}</button>
+          ))}
+        </div>
+      ) : (
+        <input value={m.categoria} onChange={(e) => setM({ ...m, categoria: e.target.value })} placeholder="Ej: sueldo, negocio, otro" />
+      )}
+      <label>Nota (opcional)</label>
+      <input value={m.nota} onChange={(e) => setM({ ...m, nota: e.target.value })} placeholder="Ej: almuerzo con cliente" />
+      <label>Fecha (vacío = hoy)</label>
+      <input type="date" value={m.fecha} onChange={(e) => setM({ ...m, fecha: e.target.value })} />
+      {msg && <div className="error">{msg}</div>}
+      <button className="btn" style={{ marginTop: 14, width: "100%" }} disabled={!(Number(m.monto) > 0) || !m.categoria.trim()} onClick={guardar}>
+        Guardar {tipo}
+      </button>
+    </div>
+  );
+}
+
+function PresupuestosTab({ presupuestos, categorias, recargar }: { presupuestos: any[]; categorias: any[]; recargar: () => void }) {
+  const [cat, setCat] = useState(""), [lim, setLim] = useState("");
+  const cats = [...new Set([...CAT_GASTO, ...categorias.map((c) => c.categoria)])];
+  async function guardar() {
+    if (!cat || !(Number(lim) > 0)) return;
+    await fetch("/api/personal", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accion: "presupuesto", categoria: cat, limite: Number(lim) }) });
+    setCat(""); setLim(""); recargar();
+  }
+  return (
+    <div className="tarjeta">
+      <h2>Presupuesto mensual por categoría</h2>
+      <p className="sub">Poné un tope a cada categoría. Cuando lo superes o estés al 80%, te aviso en el panel.</p>
+      <div className="grid4" style={{ alignItems: "end", marginTop: 10 }}>
+        <div style={{ gridColumn: "span 2" }}>
+          <label>Categoría</label>
+          <select value={cat} onChange={(e) => setCat(e.target.value)}>
+            <option value="">Elegí…</option>
+            {cats.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div><label>Límite (S/)</label><input className="mono" value={lim} onChange={(e) => setLim(e.target.value.replace(/[^\d.]/g, ""))} /></div>
+        <button className="btn" onClick={guardar} disabled={!cat || !(Number(lim) > 0)}>Guardar</button>
+      </div>
+      <div className="tabla-scroll" style={{ marginTop: 16 }}><table><tbody>
+        <tr><th>Categoría</th><th style={{ textAlign: "right" }}>Límite mensual</th><th /></tr>
+        {presupuestos.map((p: any) => (
+          <tr key={p.categoria}>
+            <td><b>{p.categoria}</b></td>
+            <td className="mono" style={{ textAlign: "right" }}>{soles(p.limite)}</td>
+            <td><button className="btn chico sec" onClick={async () => {
+              await fetch("/api/personal", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ categoria: p.categoria }) });
+              recargar();
+            }}>Quitar</button></td>
+          </tr>
+        ))}
+        {!presupuestos.length && <tr><td colSpan={3} style={{ color: "var(--tinta2)" }}>Todavía no pusiste límites.</td></tr>}
+      </tbody></table></div>
+    </div>
+  );
+}
+
+function AjustesTab({ saldoInicial, metaAhorro, recargar }: { saldoInicial: number; metaAhorro: number; recargar: () => void }) {
+  const [saldo, setSaldo] = useState(String(saldoInicial || ""));
+  const [meta, setMeta] = useState(String(metaAhorro || ""));
+  const [msg, setMsg] = useState("");
+  async function guardar() {
+    await fetch("/api/personal", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accion: "ajuste", saldoInicial: Number(saldo) || 0, metaAhorro: Number(meta) || 0 }) });
+    setMsg("Guardado."); recargar();
+  }
+  return (
+    <div className="tarjeta">
+      <h2>Ajustes</h2>
+      <label>Saldo inicial (lo que tenés hoy)</label>
+      <input className="mono" value={saldo} onChange={(e) => setSaldo(e.target.value.replace(/[^\d.]/g, ""))} placeholder="Ej: 208000" />
+      <p className="sub">Desde acá el sistema suma tus ingresos y resta tus gastos para mostrarte el saldo real.</p>
+      <label style={{ marginTop: 12 }}>Meta de ahorro mensual (S/)</label>
+      <input className="mono" value={meta} onChange={(e) => setMeta(e.target.value.replace(/[^\d.]/g, ""))} placeholder="Ej: 15000" />
+      <p className="sub">Cuánto querés que te sobre cada mes. El panel te muestra si lo estás cumpliendo.</p>
+      {msg && <div className="ok">{msg}</div>}
+      <button className="btn" style={{ marginTop: 14 }} onClick={guardar}>Guardar ajustes</button>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { exigir } from "@/lib/auth";
-import { devengado, diaDe, INVERSION } from "@/lib/finanzas";
+import { devengado, diaDe } from "@/lib/finanzas";
 
 /** Panel de finanzas: ventas por día, saldos por trabajador, gastos y pagos. */
 export async function GET(req: Request) {
@@ -11,6 +11,8 @@ export async function GET(req: Request) {
     const hasta = url.searchParams.get("hasta");
 
     const { filas, ventas, pagos, usuarios } = await devengado();
+    const gastos = await db.gasto.findMany({ orderBy: { fecha: "desc" } });
+    const totalGastos = gastos.reduce((n, g) => n + g.monto, 0);
 
     // Ventas agrupadas por día, para el gráfico y el selector de fecha.
     const porDia = new Map<string, { dia: string; ventas: number; monto: number; validadas: number }>();
@@ -31,25 +33,24 @@ export async function GET(req: Request) {
     const totalGanado = filas.reduce((n, f) => n + f.ganado, 0);
     const totalPagado = filas.reduce((n, f) => n + f.pagado, 0);
     const vendidoTotal = ventas.reduce((n, v) => n + (v.monto ?? 0), 0);
-    const inversion = vendidoTotal * INVERSION;
 
     return Response.json({
       dias, diasRango, vendidoRango,
       resumen: {
         vendidoTotal,
         ventas: ventas.length,
-        inversion,
         comisiones: filas.reduce((n, f) => n + f.comision, 0),
         fijos: filas.reduce((n, f) => n + f.fijo, 0),
         bonos: filas.reduce((n, f) => n + f.bono, 0),
         totalGanado,
         totalPagado,
         porPagar: totalGanado - totalPagado,
-        gastos: totalGanado + inversion,
-        utilidad: vendidoTotal - totalGanado - inversion,
-        porcentajeInversion: INVERSION,
+        operativos: totalGastos,
+        gastos: totalGanado + totalGastos,
+        utilidad: vendidoTotal - totalGanado - totalGastos,
       },
       trabajadores: filas,
+      gastos: gastos.map((g) => ({ id: g.id, concepto: g.concepto, monto: g.monto, fecha: g.fecha, categoria: g.categoria })),
       pagos: pagos.map((p) => ({ ...p, nombre: nombre(p.usuarioId) })),
     });
   } catch (e) {
