@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { exigir, auditar } from "@/lib/auth";
 import { avisarAsignacion } from "@/lib/notificaciones";
+import { dataDeHoy, topeDe, diaHoy, resumenCarga } from "@/lib/carga";
 
 const digitos = (t: string) => t.replace(/\D/g, "");
 
@@ -31,7 +32,9 @@ export async function GET() {
       orderBy: s.rol === "CALLER" ? [{ estado: "asc" }, { creadoEn: "asc" }] : [{ creadoEn: "desc" }],
       take: 500,
     });
-    return Response.json({ leads });
+    // El spamer y el admin necesitan ver cuánta data tiene hoy cada caller.
+    const carga = (s.rol === "CARGADOR" || s.rol === "ADMIN") ? await resumenCarga() : undefined;
+    return Response.json({ leads, carga });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
@@ -48,6 +51,14 @@ export async function POST(req: Request) {
     if (!callers.length) return Response.json({ error: "No hay callers activos." }, { status: 400 });
 
     const creados: number[] = [], rechazados: string[] = [], avisos: string[] = [];
+    const dia = diaHoy();
+    // Precargo cuánto lleva hoy cada caller y su tope, para no consultar en cada fila.
+    const yaHoy = new Map<string, number>();
+    const topes = new Map<string, number>();
+    for (const c of callers) {
+      yaHoy.set(c.id, await dataDeHoy(c.id, dia));
+      topes.set(c.id, await topeDe(c.id, dia));
+    }
     for (const f of filas) {
       const nombre = String(f.nombre ?? "").trim();
       const dni = String(f.dni ?? "").trim();
@@ -63,6 +74,14 @@ export async function POST(req: Request) {
         rechazados.push(`${nombre}: falta elegir el caller`);
         continue;
       }
+      // Control de tope diario por caller (suma de todos los spamers).
+      const cargaActual = yaHoy.get(destinoId) ?? 0;
+      const tope = topes.get(destinoId) ?? 20;
+      if (cargaActual >= tope) {
+        const cName = callers.find((c: { id: string }) => c.id === destinoId)?.nombre ?? "el caller";
+        rechazados.push(`${nombre}: ${cName} ya llegó a su tope de hoy (${tope}). Pedí permiso al admin para subirle más.`);
+        continue;
+      }
       const repetido = await db.lead.count({ where: { dni } });
       const lead = await db.lead.create({
         data: {
@@ -71,6 +90,7 @@ export async function POST(req: Request) {
         },
       });
       creados.push(lead.id);
+      yaHoy.set(destinoId, cargaActual + 1);
       if (repetido) avisos.push(`${nombre}: cargado, pero ese DNI ya tenía ${repetido} contacto(s) con otro número`);
       await avisarAsignacion(lead.id);
     }

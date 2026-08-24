@@ -218,3 +218,29 @@ model AjustePersonal {
   clave String @id
   valor String
 }
+
+/// Tope especial de data para un caller en un día puntual (lo sube el admin).
+/// Si no hay fila, rige el límite general (20).
+model TopeCarga {
+  id       Int      @id @default(autoincrement())
+  callerId String
+  dia      String   // "YYYY-MM-DD" en hora Perú
+  tope     Int      // nuevo máximo de data para ese caller ese día
+  puestoPor String
+  creadoEn DateTime @default(now())
+
+  @@unique([callerId, dia])
+}
+
+/// Pedido de un spamer para subirle más data a un caller que ya llegó al tope.
+model PedidoCarga {
+  id        Int      @id @default(autoincrement())
+  callerId  String
+  spamerId  String
+  dia       String
+  estado    String   @default("PENDIENTE") // PENDIENTE | APROBADO | RECHAZADO
+  creadoEn  DateTime @default(now())
+  resueltoEn DateTime?
+
+  @@index([estado])
+}

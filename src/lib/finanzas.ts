@@ -39,17 +39,44 @@ export async function devengado() {
 
   const semanas = [...new Set([...ventas.map((v) => semanaDe(v.creadoEn)), ...leads.map((l) => semanaDe(l.creadoEn))])].sort();
 
-  // Campeones de cada semana: definen quién cobra 12% la semana siguiente.
-  const campeon = (ids: string[]) => {
-    const c = new Map<string, number>();
-    ids.forEach((id) => id && c.set(id, (c.get(id) ?? 0) + 1));
-    return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  // El 12% se define por EQUIPO: gana el 1° de su grupo, y solo si el equipo
+  // tiene al menos MIN_EQUIPO personas de ese rol activas.
+  const MIN_EQUIPO = 3;
+  const equipoDeUsuario = (id: string) => {
+    const u = usuarios.find((x) => x.id === id);
+    if (!u) return "sin-equipo";
+    return u.rol === "ENCARGADO" ? u.id : (u.encargadoId ?? "sin-equipo");
   };
-  const campeonCaller = new Map<string, string | null>();
-  const campeonSpamer = new Map<string, string | null>();
+  const rolDe = (id: string) => usuarios.find((x) => x.id === id)?.rol;
+
+  // Cuántos de cada rol hay por equipo (para el mínimo de 3).
+  const cuentaRolEquipo = (eq: string, rol: string) =>
+    usuarios.filter((u) => u.rol === rol && (rol === "ENCARGADO" ? u.id : u.encargadoId ?? "sin-equipo") === eq).length;
+
+  // Campeón por (equipo, rol, semana).
+  const campeonPorEquipo = (ids: string[], rol: string) => {
+    const porEquipo = new Map<string, Map<string, number>>();
+    ids.forEach((id) => {
+      if (rolDe(id) !== rol) return;
+      const eq = equipoDeUsuario(id);
+      if (!porEquipo.has(eq)) porEquipo.set(eq, new Map());
+      const m = porEquipo.get(eq)!;
+      m.set(id, (m.get(id) ?? 0) + 1);
+    });
+    const ganadores = new Set<string>();
+    porEquipo.forEach((m, eq) => {
+      if (cuentaRolEquipo(eq, rol) < MIN_EQUIPO) return; // equipo chico: sin 12%
+      const top = [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (top) ganadores.add(top);
+    });
+    return ganadores; // conjunto de ids que ganaron su equipo esa semana
+  };
+
+  const campeonCaller = new Map<string, Set<string>>();
+  const campeonSpamer = new Map<string, Set<string>>();
   semanas.forEach((sem) => {
-    campeonCaller.set(sem, campeon(ventas.filter((v) => semanaDe(v.creadoEn) === sem).map((v) => v.callerId)));
-    campeonSpamer.set(sem, campeon(leads.filter((l) => semanaDe(l.creadoEn) === sem).map((l) => l.cargadoPorId!)));
+    campeonCaller.set(sem, campeonPorEquipo(ventas.filter((v) => semanaDe(v.creadoEn) === sem).map((v) => v.callerId), "CALLER"));
+    campeonSpamer.set(sem, campeonPorEquipo(leads.filter((l) => semanaDe(l.creadoEn) === sem).map((l) => l.cargadoPorId!), "CARGADOR"));
   });
   const anterior = (sem: string) => semanas[semanas.indexOf(sem) - 1] ?? null;
 
@@ -65,8 +92,8 @@ export async function devengado() {
     const vSem = ventas.filter((v) => semanaDe(v.creadoEn) === sem);
     const lSem = leads.filter((l) => semanaDe(l.creadoEn) === sem);
     const prev = anterior(sem);
-    const callerCampeon = prev ? campeonCaller.get(prev) : null;
-    const spamerCampeon = prev ? campeonSpamer.get(prev) : null;
+    const callerCampeones = prev ? campeonCaller.get(prev) : null;
+    const spamerCampeones = prev ? campeonSpamer.get(prev) : null;
 
     for (const u of usuarios) {
       if (u.rol === "CALLER") {
@@ -74,7 +101,7 @@ export async function devengado() {
         if (!mias.length) continue;
         const vendido = mias.reduce((n, v) => n + (v.monto ?? 0), 0);
         const validadas = mias.filter((v) => v.validada).length;
-        sumar(u.id, "comision", vendido * (callerCampeon === u.id ? PRIMERO : BASE), mias.length, validadas);
+        sumar(u.id, "comision", vendido * (callerCampeones?.has(u.id) ? PRIMERO : BASE), mias.length, validadas);
         sumar(u.id, "fijo", validadas * POR_VALIDADA);
         sumar(u.id, "bono", bonoDe("CALLER", mias.length));
       } else if (u.rol === "CARGADOR") {
@@ -83,7 +110,7 @@ export async function devengado() {
         if (!subidas && !generadas.length) continue;
         const base = generadas.reduce((n, v) => n + (v.monto ?? 0), 0);
         const validadas = generadas.filter((v) => v.validada).length;
-        sumar(u.id, "comision", base * (spamerCampeon === u.id ? PRIMERO : BASE), subidas, validadas);
+        sumar(u.id, "comision", base * (spamerCampeones?.has(u.id) ? PRIMERO : BASE), subidas, validadas);
         sumar(u.id, "fijo", validadas * POR_VALIDADA);
         sumar(u.id, "bono", bonoDe("CARGADOR", subidas));
       } else if (u.rol === "PROCESADOR") {

@@ -509,15 +509,37 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
   const [f, setF] = useState(vacio);
   const [msg, setMsg] = useState<any>(null);
   const [masivo, setMasivo] = useState(""), [destinoMasivo, setDestinoMasivo] = useState("");
+  const [carga, setCarga] = useState<any[]>([]);
+  const [limite, setLimite] = useState(20);
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
   const num = (t: string) => t.replace(/\D/g, "");
+
+  // Estado de carga de hoy por caller (cuánto lleva / su tope).
+  const traerCarga = useCallback(() => {
+    fetch("/api/carga").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (d) { setCarga(d.carga ?? []); setLimite(d.limite ?? 20); }
+    });
+  }, []);
+  useEffect(() => { traerCarga(); }, [traerCarga]);
+
+  const estadoDe = (id: string) => carga.find((c) => c.id === id);
+  const etiquetaCaller = (c: Usuario) => {
+    const e = estadoDe(c.id);
+    return e ? `${c.nombre} — ${e.hoy}/${e.tope} hoy${e.lleno ? " · LLENO" : ""}` : c.nombre;
+  };
+  const lleno = (id: string) => !!estadoDe(id)?.lleno;
+
+  async function pedirPermiso(callerId: string) {
+    await fetch("/api/carga", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ callerId }) });
+    setMsg({ ok: "Pedido enviado al administrador. Te avisará cuando lo apruebe." });
+  }
   const faltan = !f.nombre.trim() || num(f.dni).length < 6 || num(f.telefono).length < 6 || !f.asignadoA;
 
   async function enviar(cuerpo: any) {
     const r = await fetch("/api/leads", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) });
     const d = await r.json();
     setMsg(r.ok ? d : { error: d.error });
-    recargar();
+    recargar(); traerCarga();
   }
 
   return (
@@ -543,13 +565,34 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
             <label>Caller asignado <b style={{ color: "var(--noquiso)" }}>*</b></label>
             <select value={f.asignadoA} onChange={(e) => setF({ ...f, asignadoA: e.target.value })}>
               <option value="">Elegí a quién se lo asignás…</option>
-              {callers.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              {callers.map((c) => <option key={c.id} value={c.id}>{etiquetaCaller(c)}</option>)}
             </select>
             {!callers.length && <p className="sub" style={{ color: "var(--noquiso)" }}>No hay callers activos: pedile al administrador que cree uno.</p>}
+            {f.asignadoA && lleno(f.asignadoA) && (
+              <div className="tip" style={{ borderLeft: "3px solid var(--ambar)", marginTop: 6 }}>
+                Este caller ya llegó a su tope de hoy ({estadoDe(f.asignadoA)?.tope}). No podés subirle más hasta mañana o hasta que el admin lo amplíe.
+                <button className="btn chico" style={{ marginTop: 6, display: "block" }} onClick={() => pedirPermiso(f.asignadoA)}>Pedir permiso al admin</button>
+              </div>
+            )}
           </div>
         </div>
         <label>Nota para el caller</label>
         <textarea value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} />
+        {carga.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <label>Data cargada hoy (todos los spamers) — límite {limite} por caller</label>
+            <div className="tabla-scroll"><table><tbody>
+              <tr><th>Caller</th><th style={{ textAlign: "right" }}>Hoy</th><th style={{ width: "45%" }} /></tr>
+              {carga.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.nombre}</td>
+                  <td className="mono" style={{ textAlign: "right", color: c.lleno ? "var(--noquiso)" : undefined }}>{c.hoy}/{c.tope}{c.lleno ? " · lleno" : ""}</td>
+                  <td><div className="barra"><span style={{ width: `${Math.min(100, (c.hoy / c.tope) * 100)}%`, background: c.lleno ? "var(--noquiso)" : c.hoy >= c.tope * 0.8 ? "var(--ambar)" : "var(--acepto)" }} /></div></td>
+                </tr>
+              ))}
+            </tbody></table></div>
+          </div>
+        )}
         {msg?.error && <div className="error">{msg.error}</div>}
         {msg?.creados > 0 && <div className="ok">{msg.creados} contacto(s) cargados y avisados.</div>}
         {msg?.rechazados?.length > 0 && <div className="error">Rechazados: {msg.rechazados.join(" · ")}</div>}
@@ -567,8 +610,11 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         <label>Caller que recibe toda esta lista <b style={{ color: "var(--noquiso)" }}>*</b></label>
         <select value={destinoMasivo} onChange={(e) => setDestinoMasivo(e.target.value)}>
           <option value="">Elegí el caller…</option>
-          {callers.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+          {callers.map((c) => <option key={c.id} value={c.id}>{etiquetaCaller(c)}</option>)}
         </select>
+        {destinoMasivo && estadoDe(destinoMasivo) && (
+          <p className="sub">Le quedan <b>{Math.max(0, estadoDe(destinoMasivo)!.tope - estadoDe(destinoMasivo)!.hoy)}</b> espacios hoy. Lo que pase del tope se rechaza solo.</p>
+        )}
         <label style={{ marginTop: 10 }}>Pegá acá tu lista</label>
         <textarea className="mono" style={{ minHeight: 130 }} value={masivo} onChange={(e) => setMasivo(e.target.value)}
                   placeholder={"Carla Méndez, 45868665, 987654321, pidió info\nJulián Ríos, 40912233, 912345678"} />
@@ -909,6 +955,26 @@ function Supervision() {
   const [d, setD] = useState<any>(null);
   const [dias, setDias] = useState(7);
   const [tab, setTab] = useState<"equipo" | "spamers" | "alertas" | "bitacora">("equipo");
+  const [carga, setCarga] = useState<any>(null);
+
+  const traerCarga = useCallback(() => {
+    fetch("/api/carga").then((r) => (r.ok ? r.json() : null)).then(setCarga);
+  }, []);
+  useEffect(() => { traerCarga(); }, [traerCarga]);
+
+  async function resolver(pedido: any, aprobar: boolean) {
+    let nuevoTope: number | undefined;
+    if (aprobar) {
+      const actual = carga?.carga?.find((c: any) => c.id === pedido.callerId);
+      const sugerido = (actual?.tope ?? 20) + 10;
+      const resp = prompt(`¿Hasta cuántos contactos puede tener ${pedido.caller} HOY?`, String(sugerido));
+      if (resp === null) return;
+      nuevoTope = Number(resp) || sugerido;
+    }
+    await fetch("/api/carga", { method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pedidoId: pedido.id, callerId: pedido.callerId, aprobar, nuevoTope }) });
+    traerCarga();
+  }
 
   useEffect(() => {
     fetch(`/api/supervision?dias=${dias}`).then((r) => (r.ok ? r.json() : null)).then(setD);
@@ -924,6 +990,55 @@ function Supervision() {
 
   return (
     <>
+      {carga?.pedidos?.length > 0 && (
+        <div className="tarjeta" style={{ borderLeft: "5px solid var(--ambar)", background: "#FEF9E7" }}>
+          <h2>📥 Pedidos para subir más data ({carga.pedidos.length})</h2>
+          <p className="sub">Un spamer quiere pasar del tope de hoy de estos callers. Si aprobás, subís su límite solo por hoy.</p>
+          <div className="tabla-scroll" style={{ marginTop: 8 }}><table><tbody>
+            <tr><th>Caller</th><th>Data hoy</th><th>Lo pide</th><th /></tr>
+            {carga.pedidos.map((p: any) => {
+              const est = carga.carga?.find((c: any) => c.id === p.callerId);
+              return (
+                <tr key={p.id}>
+                  <td><b>{p.caller}</b></td>
+                  <td className="mono">{est ? `${est.hoy}/${est.tope}` : "—"}</td>
+                  <td>{p.spamer}</td>
+                  <td style={{ display: "flex", gap: 6 }}>
+                    <button className="btn chico" onClick={() => resolver(p, true)}>Aprobar</button>
+                    <button className="btn chico sec" onClick={() => resolver(p, false)}>Rechazar</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody></table></div>
+        </div>
+      )}
+
+      {carga?.carga?.length > 0 && (
+        <div className="tarjeta">
+          <h2>Carga de hoy por caller</h2>
+          <div className="tabla-scroll"><table><tbody>
+            <tr><th>Caller</th><th style={{ textAlign: "right" }}>Hoy / tope</th><th style={{ width: "40%" }} /><th /></tr>
+            {carga.carga.map((c: any) => (
+              <tr key={c.id}>
+                <td>{c.nombre}</td>
+                <td className="mono" style={{ textAlign: "right", color: c.lleno ? "var(--noquiso)" : undefined }}>{c.hoy}/{c.tope}</td>
+                <td><div className="barra"><span style={{ width: `${Math.min(100, (c.hoy / c.tope) * 100)}%`, background: c.lleno ? "var(--noquiso)" : "var(--acepto)" }} /></div></td>
+                <td>
+                  <button className="btn chico sec" onClick={async () => {
+                    const resp = prompt(`Tope de ${c.nombre} para HOY:`, String(c.tope));
+                    if (resp === null) return;
+                    await fetch("/api/carga", { method: "PATCH", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ callerId: c.id, aprobar: true, nuevoTope: Number(resp) || c.tope }) });
+                    traerCarga();
+                  }}>Ajustar tope</button>
+                </td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        </div>
+      )}
+
       <div className="tarjeta" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <span className="rotulo">Período</span>
         {[1, 7, 30].map((n) => (
@@ -1155,19 +1270,50 @@ function Ranking({ sesion }: { sesion: Sesion }) {
         </p>
       </div>
 
-      {(sesion.rol === "CALLER" || sesion.rol === "ADMIN") && (
-        <>
-          <Podio titulo="Callers · más clientes que aceptaron" unidad="aceptaron"
-                 gente={d.callers} yo={sesion.id} />
-          <Premio vigentes={d.bonoVigente?.caller} tabla={d.callers} yo={sesion.id} />
-        </>
+      {/* El admin ve todos los equipos; cada quien ve solo el suyo. */}
+      {sesion.rol === "ADMIN"
+        ? (d.equipos ?? []).map((eq: any) => (
+            <EquipoRanking key={eq.equipoId} eq={eq} sesion={sesion} mostrarCallers mostrarSpamers />
+          ))
+        : <EquipoRanking eq={d} sesion={sesion}
+            mostrarCallers={sesion.rol === "CALLER"} mostrarSpamers={sesion.rol === "CARGADOR"} />
+      }
+    </>
+  );
+}
+
+/* Ranking de un solo equipo. */
+function EquipoRanking({ eq, sesion, mostrarCallers, mostrarSpamers }:
+  { eq: any; sesion: Sesion; mostrarCallers?: boolean; mostrarSpamers?: boolean }) {
+  const min = eq.minEquipo ?? 3;
+  const avisoChico = (n: number) => (
+    <div className="tarjeta" style={{ background: "var(--papel)", borderLeft: "4px solid var(--ambar)" }}>
+      El ranking se activa con <b>{min} o más</b> en el equipo. Ahora hay {n} — sumá {min - n} para que corra la competencia y el 12%.
+    </div>
+  );
+
+  return (
+    <>
+      {eq.equipoNombre && (
+        <div className="tarjeta" style={{ background: "linear-gradient(180deg,#14532D,#1B6B3A)", color: "#EAF4F6", border: 0, padding: "10px 16px" }}>
+          <b style={{ fontSize: 16 }}>🏆 {eq.equipoNombre}</b>
+        </div>
       )}
-      {(sesion.rol === "CARGADOR" || sesion.rol === "ADMIN") && (
-        <>
-          <Podio titulo="Spamers · más data subida" unidad="contactos"
-                 gente={d.spamers} yo={sesion.id} />
-          <Premio vigentes={d.bonoVigente?.spamer} tabla={d.spamers} yo={sesion.id} />
-        </>
+      {mostrarCallers && (
+        eq.rankingCallersActivo
+          ? <>
+              <Podio titulo="Callers · más clientes que aceptaron" unidad="aceptaron" gente={eq.callers} yo={sesion.id} />
+              <Premio vigentes={eq.bonoVigente?.caller} tabla={eq.callers} yo={sesion.id} />
+            </>
+          : avisoChico(eq.callers?.length ?? 0)
+      )}
+      {mostrarSpamers && (
+        eq.rankingSpamersActivo
+          ? <>
+              <Podio titulo="Spamers · más data subida" unidad="contactos" gente={eq.spamers} yo={sesion.id} />
+              <Premio vigentes={eq.bonoVigente?.spamer} tabla={eq.spamers} yo={sesion.id} />
+            </>
+          : (mostrarSpamers && (eq.spamers?.length ?? 0) >= 0 ? avisoChico(eq.spamers?.length ?? 0) : null)
       )}
     </>
   );
