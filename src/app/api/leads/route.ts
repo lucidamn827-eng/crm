@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { exigir, auditar } from "@/lib/auth";
 import { avisarAsignacion } from "@/lib/notificaciones";
 import { dataDeHoy, topeDe, diaHoy, resumenCarga } from "@/lib/carga";
+import { estadoCola } from "@/lib/cola";
 
 const digitos = (t: string) => t.replace(/\D/g, "");
 
@@ -25,7 +26,7 @@ export async function GET() {
     const leads = await db.lead.findMany({
       where: where as any,
       include: { asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },
-                 llamadas: { orderBy: { creadoEn: "desc" }, take: 1 } },
+                 llamadas: { orderBy: { creadoEn: "desc" }, take: (s.rol === "CARGADOR" || s.rol === "ADMIN" || s.rol === "ENCARGADO") ? 50 : 1 } },
       // enLlamadaDesde y asignadoAId vienen por defecto al ser campos escalares
       // El caller trabaja lo más viejo primero (la data se enfría);
       // el resto ve lo último cargado arriba.
@@ -34,7 +35,28 @@ export async function GET() {
     });
     // El spamer y el admin necesitan ver cuánta data tiene hoy cada caller.
     const carga = (s.rol === "CARGADOR" || s.rol === "ADMIN") ? await resumenCarga() : undefined;
-    return Response.json({ leads, carga });
+
+    // SEGURIDAD: al caller no le mandamos DNI ni teléfono completos de su cola.
+    // Solo se destapan de la ficha que tiene EN LLAMADA (la que confirmó llamar).
+    // Así el número real nunca viaja al navegador hasta que abre la ficha, y cada
+    // apertura queda registrada — no se puede cosechar la lista desde la consola.
+    // Al caller se le tapan DNI/teléfono SOLO de la data nueva sin abrir (PENDIENTE).
+    // Las ya trabajadas (no contestó / volver a llamar) y la que está en llamada van
+    // completas: el spamer igual les escribe, y así el caller repasa con los datos.
+    // El caller ve TODAS sus fichas en juego (data nueva + no contestó + volver a llamar),
+    // incluso las que aún no vencieron: si el cliente le devuelve la llamada, las retoma
+    // en el momento. El bloqueo de data nueva cuando hay vencidas lo maneja el flag de cola,
+    // no ocultando fichas. Solo la data NUEVA sin abrir va con datos tapados.
+    const salida = s.rol === "CALLER"
+      ? leads.map((l) => (l.enLlamadaDesde || l.estado !== "PENDIENTE")
+          ? l
+          : { ...l, dni: "", telefono: "", dispositivo: null, usuarioDisp: null })
+      : leads;
+
+    // Estado de la cola del caller: vencidas, data nueva, esperando.
+    const cola = s.rol === "CALLER" ? await estadoCola(s.id) : undefined;
+
+    return Response.json({ leads: salida, carga, cola });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });

@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { exigir, auditar } from "@/lib/auth";
 import { registrar, ipDe } from "@/lib/eventos";
+import { avisarInicioLlamada } from "@/lib/notificaciones";
+import { puedeLlamar } from "@/lib/cola";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -14,9 +16,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (s.rol === "CALLER" && lead.asignadoAId !== s.id)
       return Response.json({ error: "Esa ficha no es tuya." }, { status: 403 });
 
+    // Reglas de cola: agendado vencido manda, y data nueva se bloquea con 5+ no contestó.
+    if (tomar && s.rol === "CALLER") {
+      const permiso = await puedeLlamar(s.id, id);
+      if (!permiso.ok) return Response.json({ error: permiso.motivo }, { status: 409 });
+    }
+
     if (tomar) {
       await db.lead.update({ where: { id }, data: { enLlamadaDesde: new Date() } });
       await registrar(s, "abrio_ficha", { leadId: id, detalle: `${lead.nombre} · ${lead.telefono}`, ip });
+      // Avisar al spamer que su data entró en llamada.
+      await avisarInicioLlamada(id, s.nombre);
     } else {
       // Abrió y se arrepintió: queda registrado con cuánto la tuvo abierta.
       const seg = lead.enLlamadaDesde ? Math.floor((Date.now() - lead.enLlamadaDesde.getTime()) / 1000) : 0;

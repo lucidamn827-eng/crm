@@ -70,6 +70,50 @@ export async function correrRecordatorios() {
   if (!(await enHorario())) return { salteado: "fuera de horario", enviados: 0 };
   const c = await config();
 
+  // 1) Agendados que llegaron a su hora: aviso puntual al caller.
+  const agendados = await db.lead.findMany({
+    where: {
+      estado: "VOLVER_A_LLAMAR",
+      agendadoPara: { lte: new Date() },
+      asignadoA: { activo: true, notificar: true },
+    },
+    include: { asignadoA: true },
+    take: 200,
+  });
+  for (const l of agendados) {
+    await enviarAviso({
+      destinatario: l.asignadoA,
+      tipo: "agendado_ahora",
+      cuerpo: `⏰ ${l.asignadoA.nombre}, llegó la hora de volver a llamar a ${l.nombre} (${l.telefono}). Es tu prioridad ahora.`,
+      parametros: [l.asignadoA.nombre, l.nombre, l.telefono],
+      ficha: l,
+    });
+    // Corro el aviso 10 min para no spamear si no la llama enseguida (se re-agenda solo).
+    await db.lead.update({ where: { id: l.id }, data: { agendadoPara: new Date(Date.now() + 10 * 60000) } });
+  }
+
+  // 1b) "No contestó" cuya hora de reintento (1h) ya venció: aviso al caller.
+  const reintentos = await db.lead.findMany({
+    where: {
+      estado: "NO_CONTESTO",
+      reactivaEn: { lte: new Date() },
+      asignadoA: { activo: true, notificar: true },
+    },
+    include: { asignadoA: true },
+    take: 200,
+  });
+  for (const l of reintentos) {
+    await enviarAviso({
+      destinatario: l.asignadoA,
+      tipo: "reintento_ahora",
+      cuerpo: `🔁 ${l.asignadoA.nombre}, toca reintentar a ${l.nombre} (${l.telefono}): pasó la hora desde que no contestó.`,
+      parametros: [l.asignadoA.nombre, l.nombre, l.telefono],
+      ficha: l,
+    });
+    // Vuelve a correr 10 min para no spamear; sigue vencida hasta que la llame.
+    await db.lead.update({ where: { id: l.id }, data: { reactivaEn: new Date(Date.now() + 10 * 60000) } });
+  }
+
   const vencidas = await db.lead.findMany({
     where: {
       proximoAviso: { lte: new Date() },
@@ -151,5 +195,74 @@ export async function avisarAceptado(leadId: number, callerNombre: string) {
     tipo: "cierre_aceptado",
     cuerpo,
     parametros: [lead.cargadoPor.nombre, callerNombre, lead.nombre],
+  });
+}
+
+
+/** Aviso al spamer cuando su caller INICIA una llamada con su data. */
+export async function avisarInicioLlamada(leadId: number, callerNombre: string) {
+  const lead = await db.lead.findUnique({ where: { id: leadId }, include: { cargadoPor: true } });
+  if (!lead?.cargadoPor) return;
+  await enviarAviso({
+    destinatario: lead.cargadoPor,
+    tipo: "inicio_llamada",
+    cuerpo: `📞 ${callerNombre} está llamando a ${lead.nombre} (tu data). En curso…`,
+    parametros: [lead.cargadoPor.nombre, callerNombre, lead.nombre],
+  });
+}
+
+/** Aviso al spamer cuando su caller TERMINA: qué marcó y cuánto duró. */
+export async function avisarFinLlamada(leadId: number, callerNombre: string, resultado: string, duracion: number, agendadoPara?: Date | null) {
+  const lead = await db.lead.findUnique({ where: { id: leadId }, include: { cargadoPor: true } });
+  if (!lead?.cargadoPor) return;
+  const etiqueta: Record<string, string> = {
+    ACEPTO: "Aceptó ✅", NO_QUISO: "No quiso ❌", NO_CONTESTO: "No contestó 📵", VOLVER_A_LLAMAR: "Volver a llamar ⏰",
+  };
+  const mmss = `${Math.floor(duracion / 60)}m ${duracion % 60}s`;
+  let cuerpo = `📋 ${callerNombre} terminó con ${lead.nombre}: ${etiqueta[resultado] ?? resultado} · duró ${mmss}.`;
+  if (resultado === "VOLVER_A_LLAMAR" && agendadoPara) {
+    const hora = new Intl.DateTimeFormat("es-PE", { timeZone: process.env.TZ_OPERACION ?? "America/Lima", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(agendadoPara);
+    cuerpo += ` Quedó en volver a llamar el ${hora} — escribile al cliente para coordinar.`;
+  }
+  if (resultado === "NO_CONTESTO") {
+    cuerpo += ` No atendió — si podés, escribile para que espere el llamado.`;
+  }
+  await enviarAviso({
+    destinatario: lead.cargadoPor,
+    tipo: "fin_llamada",
+    cuerpo,
+    parametros: [lead.cargadoPor.nombre, callerNombre, lead.nombre, etiqueta[resultado] ?? resultado, mmss],
+  });
+}
+
+
+/** El spamer agendó una hora de llamada (el cliente le respondió por WhatsApp): avisar al caller. */
+export async function avisarAgendadoPorSpamer(leadId: number, spamerNombre: string) {
+  const lead = await db.lead.findUnique({ where: { id: leadId }, include: { asignadoA: true } });
+  if (!lead?.asignadoA) return;
+  const hora = lead.agendadoPara
+    ? new Intl.DateTimeFormat("es-PE", { timeZone: process.env.TZ_OPERACION ?? "America/Lima", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(lead.agendadoPara)
+    : "la hora indicada";
+  await enviarAviso({
+    destinatario: lead.asignadoA,
+    tipo: "agendado_por_spamer",
+    cuerpo: `📅 ${spamerNombre} coordinó con ${lead.nombre}: llamalo el ${hora}. Te va a aparecer como prioridad a esa hora.`,
+    parametros: [lead.asignadoA.nombre, spamerNombre, lead.nombre, hora],
+    ficha: lead,
+  });
+}
+
+
+/** Aviso URGENTE: el spamer marcó "llamar ahora" (cliente pidió llamada ya). */
+export async function avisarUrgentePorSpamer(leadId: number, spamerNombre: string, via: string) {
+  const lead = await db.lead.findUnique({ where: { id: leadId }, include: { asignadoA: true } });
+  if (!lead?.asignadoA) return;
+  const como = via === "WSP" ? "por WhatsApp" : "por teléfono";
+  await enviarAviso({
+    destinatario: lead.asignadoA,
+    tipo: "urgente_spamer",
+    cuerpo: `🚨 ¡URGENTE! ${lead.nombre} pidió que lo llames YA (${como}). ${spamerNombre} lo coordinó. Es tu prioridad ahora mismo.`,
+    parametros: [lead.asignadoA.nombre, lead.nombre, como, spamerNombre],
+    ficha: lead,
   });
 }

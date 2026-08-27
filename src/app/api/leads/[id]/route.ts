@@ -11,6 +11,52 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     const actual = await db.lead.findUnique({ where: { id } });
     if (!actual) return Response.json({ error: "La ficha no existe." }, { status: 404 });
 
+    // CASO ESPECIAL: el spamer marca "LLAMAR AHORA" (el cliente pidió que lo llamen ya).
+    // Prioridad máxima: bloquea la cola del caller como un vencido urgente y le manda alerta.
+    if (b.urgente !== undefined) {
+      if (s.rol === "CARGADOR" && actual.cargadoPorId !== s.id)
+        return Response.json({ error: "Esa ficha la cargó otra persona." }, { status: 403 });
+      const via = b.viaContacto === "WSP" ? "WSP" : "TEL";
+      const lead = await db.lead.update({
+        where: { id },
+        data: {
+          estado: "VOLVER_A_LLAMAR" as any,
+          urgentePorSpamer: new Date(),
+          agendadoPara: new Date(),   // vence ya
+          reactivaEn: null,
+          viaContacto: via,
+          nota: b.nota !== undefined ? b.nota : actual.nota,
+        },
+      });
+      const { avisarUrgentePorSpamer } = await import("@/lib/notificaciones");
+      await avisarUrgentePorSpamer(id, s.nombre, via).catch(() => {});
+      await auditar(s, "Cliente urgente marcado por spamer", `Ficha ${id} · ${actual.nombre} · ${via}`);
+      return Response.json({ ok: true, lead });
+    }
+
+    // CASO ESPECIAL: el spamer AGENDA una hora de llamada sobre su propia data
+    // (el cliente le respondió por WhatsApp y coordinó horario). Esto SÍ se permite
+    // aunque la ficha ya haya sido llamada: pone la ficha en "volver a llamar" a esa hora,
+    // lo que obliga al caller a llamarla cuando venza.
+    if (b.agendarPara !== undefined) {
+      if (s.rol === "CARGADOR" && actual.cargadoPorId !== s.id)
+        return Response.json({ error: "Esa ficha la cargó otra persona." }, { status: 403 });
+      const cuando = new Date(b.agendarPara);
+      if (isNaN(cuando.getTime()) || cuando.getTime() < Date.now() - 60000)
+        return Response.json({ error: "La hora tiene que ser futura." }, { status: 400 });
+      const lead = await db.lead.update({
+        where: { id },
+        data: { estado: "VOLVER_A_LLAMAR" as any, agendadoPara: cuando, reactivaEn: null,
+                viaContacto: b.viaContacto === "WSP" ? "WSP" : b.viaContacto === "TEL" ? "TEL" : actual.viaContacto,
+                nota: b.nota !== undefined ? b.nota : actual.nota },
+      });
+      // Avisar al caller que tiene una llamada agendada por el spamer.
+      const { avisarAgendadoPorSpamer } = await import("@/lib/notificaciones");
+      await avisarAgendadoPorSpamer(id, s.nombre).catch(() => {});
+      await auditar(s, "Llamada agendada por spamer", `Ficha ${id} · ${actual.nombre} para ${cuando.toISOString()}`);
+      return Response.json({ ok: true, lead });
+    }
+
     // El spamer solo toca lo que cargó él, y solo si el caller todavía no la trabajó.
     if (s.rol === "CARGADOR") {
       if (actual.cargadoPorId !== s.id)

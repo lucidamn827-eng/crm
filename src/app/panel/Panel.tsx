@@ -9,12 +9,13 @@ import type { Rol } from "@/lib/auth";
 type Sesion = { id: string; usuario: string; nombre: string; rol: Rol };
 type Lead = {
   id: number; nombre: string; dni: string; telefono: string; nota?: string | null;
-  estado: string; intentos: number; enLlamadaDesde?: string | null; creadoEn?: string; dispositivo?: string | null; usuarioDisp?: string | null;
+  estado: string; intentos: number; enLlamadaDesde?: string | null; creadoEn?: string; actualizadoEn?: string; dispositivo?: string | null; usuarioDisp?: string | null;
+  viaContacto?: string | null; agendadoPara?: string | null; reactivaEn?: string | null; urgentePorSpamer?: string | null;
   asignadoA: { nombre: string }; asignadoAId: string; cargadoPor: { nombre: string };
-  llamadas: { nota?: string | null; creadoEn: string }[];
+  llamadas: { id?: number; nota?: string | null; creadoEn: string; resultado?: string; duracion?: number; motivo?: string | null }[];
 };
 type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean; encargadoId?: string | null };
-type Llamada = { id: number; resultado: string; nota?: string | null; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
+type Llamada = { id: number; resultado: string; nota?: string | null; motivo?: string | null; duracion?: number; monto?: number | null; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
 
 const ETI: Record<string, { txt: string; color: string }> = {
   PENDIENTE: { txt: "Sin llamar", color: "var(--petroleo)" },
@@ -31,6 +32,19 @@ const ROL: Record<string, string> = {
 const fechaHora = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
 const eti = (e: string) => ETI[e] ?? { txt: e, color: "var(--tinta2)" };
+/** Placeholder de teléfono oculto en la cola del caller (el número real no llega al navegador). */
+const telOculto = (t?: string | null) => {
+  const d = (t ?? "").replace(/\D/g, "");
+  // Si por algún motivo llega el número (ficha en curso), muestra 2 dígitos; si no, tapa todo.
+  return d.length > 2 ? d.slice(0, 2) + "•••••••" : "•••••••••";
+};
+/** Placeholder de DNI oculto en la cola del caller. */
+const dniOculto = (_t?: string | null) => "••••••••";
+/** Deja las 2 primeras letras de cada palabra del nombre y tapa el resto: "ROSMERI ALFARO" -> "RO••••• AL••••" */
+const nombreOculto = (n?: string | null) =>
+  (n ?? "").trim().split(/\s+/).filter(Boolean)
+    .map((w) => w.length <= 2 ? w : w.slice(0, 2) + "•".repeat(w.length - 2))
+    .join(" ");
 const mmss = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
 const desde = (iso?: string | null) => (iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 1000) : 0);
 
@@ -63,6 +77,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
   const [avisosOk, setAvisosOk] = useState(sesion.rol !== "CALLER");
   const [saludo, setSaludo] = useState<any>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [cola, setCola] = useState<any>(null);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const router = useRouter();
 
@@ -72,14 +87,17 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     if (r.status === 409) return router.push("/?m=desplazada");
     if (r.status === 440) return router.push("/?m=inactividad");
     if (r.status === 401) return router.push("/?m=vencida");
-    if (r.ok) setLeads((await r.json()).leads ?? []);
+    if (r.ok) { const j = await r.json(); setLeads(j.leads ?? []); setCola(j.cola ?? null); }
     const u = await fetch("/api/usuarios");
     if (u.ok) setUsuarios((await u.json()).usuarios ?? []);
   }, [router, sesion.rol]);
 
   useEffect(() => {
     cargar();
-    const t = setInterval(cargar, sesion.rol === "ADMIN" ? 10000 : 30000);
+    // El caller sondea rápido (5s) para que un "cliente urgente" del spamer aparezca
+    // casi al instante sin refrescar. Admin cada 10s; otros roles cada 30s.
+    const cada = sesion.rol === "ADMIN" ? 10000 : sesion.rol === "CALLER" ? 5000 : 30000;
+    const t = setInterval(cargar, cada);
     return () => clearInterval(t);
   }, [cargar, sesion.rol]);
 
@@ -189,7 +207,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         )}
         <Avisador bloqueante={sesion.rol === "CALLER"} onListo={setAvisosOk} />
         {vista === "cola" && (avisosOk
-          ? <Cola leads={leads} recargar={cargar} procesadores={usuarios.filter((u) => u.rol === "PROCESADOR" && u.activo)} />
+          ? <Cola leads={leads} cola={cola} recargar={cargar} procesadores={usuarios.filter((u) => u.rol === "PROCESADOR" && u.activo)} />
           : <div className="tarjeta"><h2>Avisos desactivados</h2><p className="sub">Tu cola aparece apenas actives las notificaciones. Es obligatorio para trabajar.</p></div>)}
         {vista === "historial" && <Historial soyAdmin={false} />}
         {vista === "cargar" && <Cargar usuarios={usuarios} recargar={cargar} />}
@@ -211,11 +229,15 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 }
 
 /* ============ CALLER: cola con confirmación antes de llamar ============ */
-function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () => void; procesadores: Usuario[] }) {
+function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: any; recargar: () => void; procesadores: Usuario[] }) {
   const [porConfirmar, setPorConfirmar] = useState<Lead | null>(null);
   const [nota, setNota] = useState(""), [msg, setMsg] = useState("");
   const [cobro, setCobro] = useState<{ monto: string; referencia: string; procesadorId: string } | null>(null);
   const [festejo, setFestejo] = useState<any>(null);
+  const [volverMenu, setVolverMenu] = useState(false);
+  const [agenda, setAgenda] = useState("");
+  const [noQuisoMenu, setNoQuisoMenu] = useState(false);
+  const [motivoOtro, setMotivoOtro] = useState("");
   const enCurso = leads.find((l) => l.enLlamadaDesde);
   useTicker(!!enCurso);
 
@@ -241,10 +263,68 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
     } else {
       setMsg(`Registrado: ${eti(resultado).txt}`);
     }
-    setNota(""); recargar();
+    setNota(""); setVolverMenu(false); setAgenda(""); setNoQuisoMenu(false); setMotivoOtro(""); recargar();
   }
 
-  const pendientes = leads.filter((l) => !l.enLlamadaDesde);
+  // Sistema de reprogramación por hora:
+  //  - Fichas VENCIDAS (su hora llegó): se muestran arriba y bloquean la data nueva
+  //    hasta despacharlas. El caller elige el orden entre las vencidas.
+  //  - Fichas esperando su hora: no aparecen (las oculta el servidor).
+  //  - Data NUEVA: solo se llama si no hay vencidas.
+  const idsVencidas: number[] = cola?.idsVencidas ?? [];
+  const idsUrgentes: number[] = cola?.idsUrgentes ?? [];
+  const hayVencidas = !!cola?.hayVencidas;
+  const esUrgente = (l: Lead) => idsUrgentes.includes(l.id);
+  const urgente = leads.find((l) => idsUrgentes.includes(l.id) && !l.enLlamadaDesde);
+
+  // Cuando APARECE un cliente urgente (y el caller no está en llamada), avisar con
+  // sonido + vibración para que no se le pase, aunque esté mirando otra cosa.
+  const urgenteAnterior = useRef<number | null>(null);
+  useEffect(() => {
+    const idActual = urgente?.id ?? null;
+    if (idActual && idActual !== urgenteAnterior.current) {
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const beep = (t: number, f: number) => {
+          const o = ctx.createOscillator(), g = ctx.createGain();
+          o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+          g.gain.setValueAtTime(0.001, ctx.currentTime + t);
+          g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + t + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.25);
+          o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.26);
+        };
+        beep(0, 880); beep(0.3, 1046); beep(0.6, 880); // triple pitido de urgencia
+      } catch {}
+      try { navigator.vibrate?.([200, 100, 200, 100, 200]); } catch {}
+    }
+    urgenteAnterior.current = idActual;
+  }, [urgente?.id]);
+  const esVencida = (l: Lead) => idsVencidas.includes(l.id);
+  const esRepaso = (l: Lead) => l.estado === "NO_CONTESTO" || l.estado === "VOLVER_A_LLAMAR";
+  // Orden de la cola:
+  //  - Si hay vencidas: van arriba (bloquean la data nueva).
+  //  - Si no: primero las SIN LLAMAR (data nueva), debajo las trabajadas (no contestó / volver a llamar).
+  const prioridad = (l: Lead) => {
+    if (esUrgente(l)) return -1;                    // URGENTE (spamer): primerísimo
+    if (hayVencidas && esVencida(l)) return 0;      // vencidas
+    if (l.estado === "PENDIENTE") return 1;         // sin llamar
+    return 2;                                       // trabajadas, abajo
+  };
+  const MOTIVOS_NO = ["Le pareció caro", "Ya tiene el servicio", "No le interesa", "Desconfía / cree que es estafa", "No es la persona / número equivocado", "Pidió no llamar más"];
+  const pendientes = leads.filter((l) => !l.enLlamadaDesde)
+    .sort((a, b) => prioridad(a) - prioridad(b) || new Date(a.creadoEn ?? 0).getTime() - new Date(b.creadoEn ?? 0).getTime());
+  const primeraNueva = pendientes.find((l) => l.estado === "PENDIENTE");
+  // ¿Se puede llamar esta ficha ahora?
+  //  - Si hay vencidas: SOLO las vencidas (tienen prioridad, bloquean todo).
+  //  - Si no: la data nueva va en orden 1x1, y las trabajadas SIEMPRE se pueden
+  //    volver a llamar (si el cliente le devolvió la llamada al caller).
+  const puedeLlamarFicha = (l: Lead) => {
+    if (hayVencidas) return esVencida(l);
+    if (esRepaso(l)) return true;                                   // volver a llamar ya
+    if (l.estado === "PENDIENTE") return l.id === primeraNueva?.id; // data nueva en orden
+    return false;
+  };
+  const primerLlamableId = primeraNueva?.id;
 
   return (
     <>
@@ -254,10 +334,10 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
         <div className="velo" onClick={() => setPorConfirmar(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>¿Vas a llamar a este cliente ahora?</h2>
-            <p className="sub">{porConfirmar.nombre} · DNI {porConfirmar.dni}</p>
+            <p className="sub">{nombreOculto(porConfirmar.nombre)}</p>
             <p className="sub">Data cargada por <b>{porConfirmar.cargadoPor?.nombre ?? "—"}</b> el {fechaHora(porConfirmar.creadoEn)}</p>
-            <div className="numero" style={{ fontSize: 26, margin: "10px 0" }}>{porConfirmar.telefono}</div>
-            <p className="sub">Si decís que sí, tu supervisor va a ver que estás en llamada y arranca el cronómetro.</p>
+            <div className="numero" style={{ fontSize: 26, margin: "10px 0", letterSpacing: 2 }}>{telOculto(porConfirmar.telefono)}</div>
+            <p className="sub">Al confirmar, se destapan el DNI y el número completo para que puedas llamar — y queda registrado que abriste esta ficha. Tu supervisor ve que entraste en llamada y arranca el cronómetro.</p>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
               <button className="btn" style={{ flex: 1 }} onClick={() => tomar(porConfirmar.id, true)}>Sí, voy a llamar</button>
               <button className="btn sec" style={{ flex: 1 }} onClick={() => setPorConfirmar(null)}>No, todavía no</button>
@@ -345,8 +425,22 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
             </div>
             <span className="cronometro">{mmss(desde(enCurso.enLlamadaDesde))}</span>
           </div>
-          <span className="rotulo">Tocá el número para llamar</span>
-          <a className="numero" href={`tel:${enCurso.telefono.replace(/\D/g, "")}`}>{enCurso.telefono}</a>
+          {esUrgente(enCurso) && (
+            <div className="tip" style={{ background: "#FDEDEC", borderLeftColor: "var(--noquiso)", color: "var(--noquiso)", fontWeight: 700 }}>
+              🚨 Cliente urgente: el spamer coordinó que quiere que lo llames ya.
+            </div>
+          )}
+          {enCurso.viaContacto === "WSP" ? (
+            <>
+              <span className="rotulo">El spamer indicó: contactar por WhatsApp</span>
+              <a className="numero" href={`https://wa.me/51${enCurso.telefono.replace(/\D/g, "")}`} target="_blank" rel="noreferrer">💬 {enCurso.telefono}</a>
+            </>
+          ) : (
+            <>
+              <span className="rotulo">{enCurso.viaContacto === "TEL" ? "El spamer indicó: llamar por teléfono" : "Tocá el número para llamar"}</span>
+              <a className="numero" href={`tel:${enCurso.telefono.replace(/\D/g, "")}`}>{enCurso.telefono}</a>
+            </>
+          )}
           <p className="sub">
             DNI <span className="mono">{enCurso.dni}</span> · {enCurso.intentos} intento(s) ·
             data de <b>{enCurso.cargadoPor?.nombre ?? "—"}</b> · cargada el {fechaHora(enCurso.creadoEn)}
@@ -354,39 +448,104 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
           {enCurso.nota && <p style={{ marginTop: 8 }}><b>Nota:</b> {enCurso.nota}</p>}
           <label>Nota de la llamada</label>
           <textarea value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej: pidió que lo llamen después de las 18 h" />
-          <div className="resultados">
-            <button className="res a" onClick={() => setCobro({ monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "" })}>Aceptó</button>
-            <button className="res n" onClick={() => registrar(enCurso.id, "NO_CONTESTO")}>No contestó</button>
-            <button className="res x" onClick={() => registrar(enCurso.id, "NO_QUISO")}>No quiso</button>
-            <button className="res v" onClick={() => registrar(enCurso.id, "VOLVER_A_LLAMAR")}>Volver a llamar</button>
-          </div>
-          <button className="btn sec chico" style={{ marginTop: 12 }} onClick={() => tomar(enCurso.id, false)}>
-            Cancelar: no llegué a llamar
-          </button>
+          {noQuisoMenu ? (
+            <div className="tarjeta" style={{ background: "var(--papel)", marginTop: 8 }}>
+              <b>¿Por qué no quiso? (obligatorio)</b>
+              <p className="sub" style={{ marginTop: 2 }}>Elegí el motivo. Queda registrado para el admin.</p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                {MOTIVOS_NO.map((m) => (
+                  <button key={m} className="btn sec" style={{ textAlign: "left" }} onClick={() => registrar(enCurso.id, "NO_QUISO", { motivo: m })}>{m}</button>
+                ))}
+                <div style={{ padding: "10px", border: "1px solid var(--linea)", borderRadius: 8 }}>
+                  <label>Otro motivo</label>
+                  <input value={motivoOtro} onChange={(e) => setMotivoOtro(e.target.value)} placeholder="Escribí el motivo…" />
+                  <button className="btn" style={{ marginTop: 8, width: "100%" }} disabled={!motivoOtro.trim()}
+                          onClick={() => registrar(enCurso.id, "NO_QUISO", { motivo: motivoOtro.trim() })}>
+                    Registrar con este motivo
+                  </button>
+                </div>
+                <button className="btn sec chico" onClick={() => setNoQuisoMenu(false)}>← Volver</button>
+              </div>
+            </div>
+          ) : !volverMenu ? (
+            <div className="resultados">
+              <button className="res a" onClick={() => setCobro({ monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "" })}>Aceptó</button>
+              <button className="res x" onClick={() => setNoQuisoMenu(true)}>No quiso</button>
+              <button className="res v" onClick={() => setVolverMenu(true)}>Volver a llamar</button>
+            </div>
+          ) : (
+            <div className="tarjeta" style={{ background: "var(--papel)", marginTop: 8 }}>
+              <b>¿Qué pasó con la llamada?</b>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                <button className="btn sec" onClick={() => registrar(enCurso.id, "NO_CONTESTO")}>📵 No contestó (vuelve a tu cola en 1 hora)</button>
+                <div style={{ padding: "10px", border: "1px solid var(--linea)", borderRadius: 8 }}>
+                  <label>⏰ Volver a llamar a una hora acordada</label>
+                  <input type="datetime-local" value={agenda} onChange={(e) => setAgenda(e.target.value)} />
+                  <button className="btn" style={{ marginTop: 8, width: "100%" }} disabled={!agenda}
+                          onClick={() => registrar(enCurso.id, "VOLVER_A_LLAMAR", { agendadoPara: new Date(agenda).toISOString() })}>
+                    Agendar y avisar al spamer
+                  </button>
+                  <p className="sub" style={{ marginTop: 6 }}>A esa hora te va a saltar el recordatorio y solo vas a poder llamar a este cliente. El spamer le escribe para coordinar.</p>
+                </div>
+                <button className="btn sec chico" onClick={() => setVolverMenu(false)}>← Volver</button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="tip">Elegí a quién llamar de tu lista. Al abrir una ficha te va a preguntar si vas a llamar ahora.</div>
       )}
 
+      {urgente && !enCurso && (
+        <div className="tarjeta" style={{ border: "2px solid var(--noquiso)", background: "#FDEDEC", boxShadow: "0 0 0 4px rgba(200,40,40,.12)" }}>
+          <div style={{ fontSize: 34, lineHeight: 1 }}>🚨</div>
+          <b style={{ color: "var(--noquiso)", fontSize: 18 }}>¡Cliente urgente! Llamá ahora mismo</b>
+          <p className="sub" style={{ marginTop: 4 }}>
+            El spamer coordinó que <b>{urgente.nombre}</b> quiere que lo llamen <b>YA</b>
+            {urgente.viaContacto === "WSP" ? " por WhatsApp" : " por teléfono"}. Todo lo demás está bloqueado hasta que lo llames.
+          </p>
+          <button className="btn" style={{ marginTop: 8, background: "var(--noquiso)" }} onClick={() => setPorConfirmar(urgente)}>Llamar al cliente urgente</button>
+        </div>
+      )}
+
+      {hayVencidas && !urgente && !enCurso && (
+        <div className="tarjeta" style={{ borderLeft: "5px solid var(--noquiso)", background: "#FDEDEC" }}>
+          <b style={{ color: "var(--noquiso)" }}>⏰ Tenés {cola?.totalVencidas} contacto(s) para volver a llamar ahora</b>
+          <p className="sub" style={{ marginTop: 4 }}>Cumplieron su hora. Llamálos a todos (en el orden que quieras) antes de seguir con data nueva.</p>
+        </div>
+      )}
+
       <div className="tarjeta">
         <h2>Mis pendientes · {pendientes.length}</h2>
-        <p className="sub">Solo ves los contactos asignados a vos.</p>
+        <p className="sub">
+          {hayVencidas
+            ? "Primero los que ya cumplieron su hora (⏰). La data nueva se libera cuando los despaches."
+            : "Arriba la data nueva (se llama en orden, ▶). Abajo los que quedaron para volver a llamar — si el cliente te devuelve la llamada, tocá “Volver a llamar” y arranca el contador."}
+        </p>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Estado</th><th>Intentos</th><th /></tr>
-          {pendientes.map((l) => (
-            <tr key={l.id}>
+          <tr><th>Orden</th><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Estado</th><th>Intentos</th><th /></tr>
+          {pendientes.map((l) => {
+            const puede = puedeLlamarFicha(l);
+            const vencida = esVencida(l);
+            const repaso = esRepaso(l);
+            const esPrimeraNueva = l.id === primerLlamableId && !hayVencidas;
+            const icono = vencida ? "⏰" : repaso ? "↻" : esPrimeraNueva ? "▶" : "";
+            return (
+            <tr key={l.id} style={{ opacity: puede ? 1 : 0.5, background: vencida ? "#FDEDEC" : undefined }}>
+              <td className="mono" style={{ textAlign: "center", fontWeight: 700 }}>{icono}</td>
               <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.creadoEn)}</td>
-              <td><b>{l.nombre}</b></td>
-              <td className="mono">{l.dni}</td>
-              <td className="mono">{l.telefono}</td>
-              <td>{l.dispositivo ? <span title={l.usuarioDisp ? `Usuario: ${l.usuarioDisp}` : undefined}>{l.dispositivo}{l.usuarioDisp ? ` · ${l.usuarioDisp}` : ""}</span> : "—"}</td>
+              <td><b>{l.estado === "PENDIENTE" ? nombreOculto(l.nombre) : l.nombre}</b></td>
+              <td className="mono" style={{ letterSpacing: 1 }}>{l.estado === "PENDIENTE" ? dniOculto(l.dni) : l.dni}</td>
+              <td className="mono" style={{ letterSpacing: 1 }}>{l.estado === "PENDIENTE" ? telOculto(l.telefono) : l.telefono}</td>
               <td>{l.cargadoPor?.nombre ?? "—"}</td>
               <td><span className="eti" style={{ color: eti(l.estado).color, borderColor: eti(l.estado).color }}>{eti(l.estado).txt}</span></td>
               <td className="mono">{l.intentos}</td>
-              <td><button className="btn sec chico" disabled={!!enCurso} onClick={() => setPorConfirmar(l)}>Llamar</button></td>
+              <td>{puede
+                ? <button className="btn chico" disabled={!!enCurso} onClick={() => setPorConfirmar(l)}>{(vencida || repaso) ? "Volver a llamar" : "Llamar"}</button>
+                : <span className="sub">{l.estado === "PENDIENTE" && hayVencidas ? "bloqueada" : "en espera"}</span>}</td>
             </tr>
-          ))}
-          {!pendientes.length && <tr><td colSpan={8} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes.</td></tr>}
+          );})}
+          {!pendientes.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes ahora. Si marcaste “no contestó”, esas fichas vuelven a la hora reprogramada.</td></tr>}
         </tbody></table></div>
         {enCurso && <div className="tip">Terminá la llamada en curso antes de abrir otra ficha.</div>}
       </div>
@@ -398,6 +557,8 @@ function Cola({ leads, recargar, procesadores }: { leads: Lead[]; recargar: () =
 function Historial({ soyAdmin }: { soyAdmin: boolean }) {
   const [llamadas, setLlamadas] = useState<Llamada[]>([]);
   const [abierto, setAbierto] = useState<number | null>(null);
+  const [q, setQ] = useState("");
+  const [filtro, setFiltro] = useState<"todos" | "ACEPTO" | "NO_QUISO">("todos");
   const traer = useCallback(() => {
     fetch("/api/llamadas").then((r) => (r.ok ? r.json() : { llamadas: [] })).then((d) => setLlamadas(d.llamadas ?? []));
   }, []);
@@ -406,49 +567,76 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
   // Agrupo por contacto: la última llamada manda, las anteriores quedan como intentos.
   const porLead = new Map<number, Llamada[]>();
   llamadas.forEach((l) => porLead.set(l.leadId, [...(porLead.get(l.leadId) ?? []), l]));
-  const filas = [...porLead.values()].map((ls) => ({ ultima: ls[0], intentos: ls, total: ls.length }));
-  const acep = filas.filter((f) => f.ultima.resultado === "ACEPTO").length;
+  const todas = [...porLead.values()].map((ls) => ({ ultima: ls[0], intentos: ls, total: ls.length }));
+  // "Mis llamadas" muestra los cerrados: aceptaron y no quisieron.
+  const cerradas = todas.filter((f) => f.ultima.resultado === "ACEPTO" || f.ultima.resultado === "NO_QUISO");
+  const acep = cerradas.filter((f) => f.ultima.resultado === "ACEPTO").length;
+  const noq = cerradas.filter((f) => f.ultima.resultado === "NO_QUISO").length;
+
+  // Búsqueda por nombre (ignora tildes/orden), DNI o teléfono + filtro por resultado.
+  const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const termino = norm(q.trim());
+  const digitos = q.replace(/\D/g, "");
+  const filas = cerradas.filter((f) => {
+    if (filtro !== "todos" && f.ultima.resultado !== filtro) return false;
+    if (!q.trim()) return true;
+    const l = f.ultima.lead;
+    const nombreOk = termino && norm(l?.nombre ?? "").split(/\s+/).every((p) => !termino.split(/\s+/).some((t) => !norm(l?.nombre ?? "").includes(t))) && termino.split(/\s+/).every((t) => norm(l?.nombre ?? "").includes(t));
+    const dniOk = digitos && (l?.dni ?? "").includes(digitos);
+    const telOk = digitos && (l?.telefono ?? "").replace(/\D/g, "").includes(digitos);
+    return nombreOk || dniOk || telOk;
+  });
 
   return (
     <>
       <div className="grid4">
-        <div className="metrica"><span className="rotulo">Contactos trabajados</span><b>{filas.length}</b></div>
-        <div className="metrica"><span className="rotulo">Llamadas hechas</span><b>{llamadas.length}</b></div>
+        <div className="metrica"><span className="rotulo">Cerrados</span><b>{cerradas.length}</b></div>
         <div className="metrica"><span className="rotulo">Aceptaron</span><b>{acep}</b></div>
-        <div className="metrica"><span className="rotulo">Efectividad</span><b>{filas.length ? Math.round((acep / filas.length) * 100) : 0}%</b></div>
+        <div className="metrica"><span className="rotulo">No quisieron</span><b>{noq}</b></div>
+        <div className="metrica"><span className="rotulo">Efectividad</span><b>{cerradas.length ? Math.round((acep / cerradas.length) * 100) : 0}%</b></div>
       </div>
       <div className="tarjeta">
-        <h2>Mis contactos trabajados</h2>
-        <p className="sub">Una fila por persona, con el resultado más reciente. Tocá los intentos para ver el detalle.</p>
+        <h2>Mis llamadas</h2>
+        <p className="sub">Los contactos que cerraste: aceptaron y no quisieron. Buscá por nombre, DNI o teléfono.</p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+          <input placeholder="Buscar por nombre, DNI o teléfono…" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+          <select value={filtro} onChange={(e) => setFiltro(e.target.value as any)} style={{ width: "auto" }}>
+            <option value="todos">Todos</option>
+            <option value="ACEPTO">Aceptaron</option>
+            <option value="NO_QUISO">No quisieron</option>
+          </select>
+          <span className="sub" style={{ alignSelf: "center" }}>{filas.length} contacto(s)</span>
+        </div>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Última llamada</th><th>Contacto</th><th>DNI</th><th>Spamer</th><th>Resultado actual</th><th>Intentos</th><th>Nota</th></tr>
+          <tr><th>Última llamada</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Resultado</th><th>Motivo</th><th>Intentos</th></tr>
           {filas.map((f) => (
             <Fragment key={f.ultima.leadId}>
               <tr>
                 <td className="mono">{new Date(f.ultima.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                <td>{f.ultima.lead?.nombre}</td>
+                <td><b>{f.ultima.lead?.nombre}</b></td>
                 <td className="mono">{f.ultima.lead?.dni}</td>
+                <td className="mono">{f.ultima.lead?.telefono}</td>
                 <td>{f.ultima.lead?.cargadoPor?.nombre ?? "—"}</td>
                 <td><span className="eti" style={{ color: eti(f.ultima.resultado).color, borderColor: eti(f.ultima.resultado).color }}>{eti(f.ultima.resultado).txt}</span></td>
+                <td className="sub">{f.ultima.motivo ?? "—"}</td>
                 <td>
                   <button className="btn sec chico" onClick={() => setAbierto(abierto === f.ultima.leadId ? null : f.ultima.leadId)}>
                     {f.total} {abierto === f.ultima.leadId ? "▲" : "▼"}
                   </button>
                 </td>
-                <td>{f.ultima.nota ?? "—"}</td>
               </tr>
               {abierto === f.ultima.leadId && f.intentos.map((i) => (
                 <tr key={i.id} style={{ background: "#F6F9FB" }}>
                   <td className="mono" style={{ paddingLeft: 24 }}>{new Date(i.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
-                  <td colSpan={3} style={{ color: "var(--tinta2)" }}>intento previo</td>
+                  <td colSpan={4} style={{ color: "var(--tinta2)" }}>intento previo</td>
                   <td><span className="eti" style={{ color: eti(i.resultado).color, borderColor: eti(i.resultado).color }}>{eti(i.resultado).txt}</span></td>
+                  <td>{i.motivo ?? "—"}</td>
                   <td />
-                  <td>{i.nota ?? "—"}</td>
                 </tr>
               ))}
             </Fragment>
           ))}
-          {!filas.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Todavía no registraste llamadas.</td></tr>}
+          {!filas.length && <tr><td colSpan={8} style={{ color: "var(--tinta2)" }}>{q.trim() || filtro !== "todos" ? "No hay contactos que coincidan." : "Todavía no cerraste llamadas."}</td></tr>}
         </tbody></table></div>
       </div>
     </>
@@ -638,6 +826,10 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
   const [form, setForm] = useState<any>({});
   const [msg, setMsg] = useState("");
   const [texto, setTexto] = useState("");
+  const [coord, setCoord] = useState<Lead | null>(null);      // ficha en coordinación (spamer)
+  const [via, setVia] = useState<"TEL" | "WSP">("TEL");
+  const [cuando, setCuando] = useState("");
+  const [verHist, setVerHist] = useState<number | null>(null); // ficha con historial abierto
   const [fCaller, setFCaller] = useState(""), [fSpamer, setFSpamer] = useState(""), [fEstado, setFEstado] = useState("");
   useTicker(!!admin);
 
@@ -685,6 +877,24 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
     if (!r.ok) return setMsg(d.error ?? "No se pudo guardar.");
     setEdit(null); setMsg(""); recargar?.();
   }
+  async function agendar(l: Lead) {
+    const r = await fetch(`/api/leads/${l.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agendarPara: new Date(cuando).toISOString(), viaContacto: via }),
+    });
+    const d = await r.json();
+    if (!r.ok) return setMsg(d.error ?? "No se pudo agendar.");
+    setCoord(null); setCuando(""); setMsg(""); recargar?.();
+  }
+  async function llamarAhora(l: Lead) {
+    const r = await fetch(`/api/leads/${l.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ urgente: true, viaContacto: via }),
+    });
+    const d = await r.json();
+    if (!r.ok) return setMsg(d.error ?? "No se pudo marcar urgente.");
+    setCoord(null); setMsg(""); recargar?.();
+  }
   async function borrar() {
     if (!confirm(`¿Eliminar la ficha de ${edit!.nombre}? Se borra también su historial de llamadas.`)) return;
     const r = await fetch(`/api/leads/${edit!.id}`, { method: "DELETE" });
@@ -694,6 +904,32 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
 
   return (
     <>
+      {coord && (
+        <div className="velo" onClick={() => setCoord(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Coordinar con {coord.nombre}</h2>
+            <p className="sub">El cliente te respondió por WhatsApp. Elegí cómo debe contactarlo el caller y cuándo.</p>
+            <label>¿Cómo debe contactarlo el caller?</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <button className={`btn ${via === "TEL" ? "" : "sec"}`} style={{ flex: 1 }} onClick={() => setVia("TEL")}>📞 Llamada normal</button>
+              <button className={`btn ${via === "WSP" ? "" : "sec"}`} style={{ flex: 1 }} onClick={() => setVia("WSP")}>💬 Por WhatsApp</button>
+            </div>
+            <div style={{ padding: 12, border: "2px solid var(--noquiso)", borderRadius: 8, background: "#FDEDEC", marginBottom: 12 }}>
+              <b style={{ color: "var(--noquiso)" }}>🚨 El cliente quiere que lo llamen YA</b>
+              <p className="sub" style={{ margin: "4px 0 8px" }}>Le llega una alerta al caller y se le bloquea todo hasta que lo atienda.</p>
+              <button className="btn" style={{ width: "100%", background: "var(--noquiso)" }} onClick={() => llamarAhora(coord)}>Marcar como urgente (llamar ahora)</button>
+            </div>
+            <div style={{ padding: 12, border: "1px solid var(--linea)", borderRadius: 8 }}>
+              <label>…o agendar una hora acordada</label>
+              <input type="datetime-local" value={cuando} onChange={(e) => setCuando(e.target.value)} />
+              <button className="btn" style={{ width: "100%", marginTop: 8 }} disabled={!cuando} onClick={() => agendar(coord)}>Agendar y avisar al caller</button>
+            </div>
+            {msg && <div className="error" style={{ marginTop: 10 }}>{msg}</div>}
+            <button className="btn sec chico" style={{ marginTop: 12 }} onClick={() => setCoord(null)}>Cerrar</button>
+          </div>
+        </div>
+      )}
+
       {edit && (
         <div className="velo" onClick={() => setEdit(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -771,9 +1007,10 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
             <th>Ficha</th><th>Cargado</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Dispositivo</th><th>Spamer</th><th>Caller</th><th>Estado</th><th>Intentos</th><th>Última nota</th>{editable && <th />}
           </tr>
           {filtrados.map((l) => (
-            <tr key={l.id}>
+            <Fragment key={l.id}>
+            <tr>
               <td className="mono">{String(l.id).padStart(4, "0")}</td>
-              <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.creadoEn)}</td>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.actualizadoEn ?? l.creadoEn)}</td>
               <td><b>{l.nombre}</b></td>
               <td className="mono">{l.dni}</td>
               <td className="mono">{l.telefono}</td>
@@ -785,16 +1022,46 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
                   ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>● En llamada {mmss(desde(l.enLlamadaDesde))}</span>
                   : <span className="eti" style={{ color: eti(l.estado).color, borderColor: eti(l.estado).color }}>{eti(l.estado).txt}</span>}
               </td>
-              <td className="mono">{l.intentos}</td>
+              <td className="mono">
+                {l.intentos > 0
+                  ? <button className="btn sec chico" onClick={() => setVerHist(verHist === l.id ? null : l.id)}>{l.intentos} {verHist === l.id ? "▲" : "▼"}</button>
+                  : "0"}
+              </td>
               <td>{l.llamadas?.[0]?.nota ?? "—"}</td>
               {editable && (
                 <td>
-                  {editable === "spamer" && l.intentos > 0
-                    ? <span className="sub">ya llamada</span>
-                    : <button className="btn sec chico" onClick={() => abrir(l)}>Corregir</button>}
+                  {editable === "spamer" ? (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button className="btn chico" onClick={() => { setCoord(l); setVia((l.viaContacto as any) ?? "TEL"); }}>Coordinar</button>
+                      {l.intentos === 0 && <button className="btn sec chico" onClick={() => abrir(l)}>Corregir</button>}
+                    </div>
+                  ) : (
+                    <button className="btn sec chico" onClick={() => abrir(l)}>Corregir</button>
+                  )}
                 </td>
               )}
             </tr>
+            {verHist === l.id && (
+              <tr style={{ background: "#F6F9FB" }}>
+                <td colSpan={editable ? 12 : 11}>
+                  <b>Reporte del caller sobre esta ficha:</b>
+                  {l.llamadas?.length ? (
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                      {l.llamadas.map((c: any) => (
+                        <li key={c.id}>
+                          {new Date(c.creadoEn).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })} —{" "}
+                          <b style={{ color: eti(c.resultado).color }}>{eti(c.resultado).txt}</b>
+                          {c.duracion ? ` · duró ${mmss(c.duracion)}` : ""}
+                          {c.motivo ? ` · motivo: ${c.motivo}` : ""}
+                          {c.nota ? ` · "${c.nota}"` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="sub" style={{ marginTop: 4 }}>Sin intentos registrados.</p>}
+                </td>
+              </tr>
+            )}
+            </Fragment>
           ))}
           {!filtrados.length && <tr><td colSpan={editable ? 12 : 11} style={{ color: "var(--tinta2)" }}>
             {leads.length ? "Ningún contacto coincide con la búsqueda." : "Todavía no hay contactos cargados."}
@@ -958,7 +1225,7 @@ function Avisos() {
 function Supervision() {
   const [d, setD] = useState<any>(null);
   const [dias, setDias] = useState(7);
-  const [tab, setTab] = useState<"equipo" | "spamers" | "asistencia" | "alertas" | "bitacora">("equipo");
+  const [tab, setTab] = useState<"equipo" | "spamers" | "asistencia" | "seguridad" | "llamadas" | "alertas" | "bitacora">("equipo");
   const [carga, setCarga] = useState<any>(null);
 
   const traerCarga = useCallback(() => {
@@ -1051,7 +1318,7 @@ function Supervision() {
           </button>
         ))}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {([["equipo", "Callers"], ["spamers", "Spamers"], ["asistencia", "Asistencia"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
+          {([["equipo", "Callers"], ["spamers", "Spamers"], ["asistencia", "Asistencia"], ["seguridad", "🛡️ Seguridad"], ["llamadas", "📋 Llamadas"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
             <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
           ))}
         </span>
@@ -1229,6 +1496,10 @@ function Supervision() {
       )}
 
       {tab === "asistencia" && <Asistencia />}
+
+      {tab === "seguridad" && <Seguridad />}
+
+      {tab === "llamadas" && <RegistroLlamadas />}
 
       {tab === "bitacora" && (
         <div className="tarjeta">
@@ -2736,5 +3007,120 @@ function Asistencia() {
         </div>
       </div>
     </>
+  );
+}
+
+/* ============ SEGURIDAD: detección de cosecha de data (admin) ============ */
+function Seguridad() {
+  const [d, setD] = useState<any>(null);
+  const [dias, setDias] = useState(7);
+  const [abierto, setAbierto] = useState<string | null>(null);
+  useEffect(() => { fetch(`/api/seguridad?dias=${dias}`).then((r) => (r.ok ? r.json() : null)).then(setD); }, [dias]);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  return (
+    <>
+      <div className="tarjeta" style={{ background: "#FEF9E7", borderLeft: "5px solid var(--ambar)" }}>
+        <b>🛡️ Cuidado de la data.</b> Acá ves quién abre muchas fichas sin llamarlas — el patrón típico de alguien que copia data en vez de trabajarla.
+        No frena a nadie: es para que vos mires y decidas. Un caller que trabaja normal abre una ficha, llama y la cierra; el que cosecha abre muchas de golpe sin llamar.
+      </div>
+
+      {d.sospechosos.length > 0 && (
+        <div className="tarjeta" style={{ borderLeft: "5px solid var(--noquiso)", background: "#FDEDEC" }}>
+          <b style={{ color: "var(--noquiso)" }}>⚠️ Para revisar: {d.sospechosos.join(", ")}</b>
+          <p className="sub" style={{ marginTop: 4 }}>Tienen un patrón que no parece trabajo normal. Miralo en detalle abajo antes de sacar conclusiones.</p>
+        </div>
+      )}
+
+      <div className="tarjeta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span className="rotulo">Período</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {[1, 7, 15, 30].map((n) => <button key={n} className={`btn chico ${dias === n ? "" : "sec"}`} onClick={() => setDias(n)}>{n === 1 ? "hoy" : `${n} días`}</button>)}
+        </span>
+      </div>
+
+      <div className="tarjeta">
+        <h2>Actividad por caller</h2>
+        <div className="tabla-scroll"><table><tbody>
+          <tr>
+            <th>Caller</th><th style={{ textAlign: "right" }}>Fichas abiertas</th><th style={{ textAlign: "right" }}>Llamó</th>
+            <th style={{ textAlign: "right" }}>% que llamó</th><th style={{ textAlign: "right" }}>Abiertas sin llamar</th><th style={{ textAlign: "right" }}>Pico/hora</th><th />
+          </tr>
+          {d.callers.map((c: any) => (
+            <Fragment key={c.id}>
+              <tr style={{ background: c.sospechoso ? "#FDEDEC" : undefined }}>
+                <td><b>{c.nombre}</b>{!c.activo && <span className="sub"> (inactivo)</span>} {c.sospechoso && "⚠️"}</td>
+                <td className="mono" style={{ textAlign: "right" }}>{c.totalAbiertas}</td>
+                <td className="mono" style={{ textAlign: "right" }}>{c.totalLlamadas}</td>
+                <td className="mono" style={{ textAlign: "right", color: c.ratio < 50 ? "var(--noquiso)" : "var(--acepto)" }}>{c.ratio}%</td>
+                <td className="mono" style={{ textAlign: "right", color: c.abiertasSinLlamar >= 15 ? "var(--noquiso)" : undefined }}>{c.abiertasSinLlamar}</td>
+                <td className="mono" style={{ textAlign: "right" }}>{c.picoPorHora}</td>
+                <td>{c.rafagas.length > 0 && <button className="btn chico sec" onClick={() => setAbierto(abierto === c.id ? null : c.id)}>{abierto === c.id ? "Ocultar" : `${c.rafagas.length} ráfaga(s)`}</button>}</td>
+              </tr>
+              {abierto === c.id && (
+                <tr><td colSpan={7} style={{ background: "var(--papel)" }}>
+                  <b>Ráfagas de aperturas sin llamar</b> (5+ fichas en 5 minutos sin marcar ninguna):
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                    {c.rafagas.map((r: any, i: number) => <li key={i}>{r.desde} — abrió {r.aperturas} fichas seguidas sin llamar</li>)}
+                  </ul>
+                </td></tr>
+              )}
+            </Fragment>
+          ))}
+          {!d.callers.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>Sin actividad en el período.</td></tr>}
+        </tbody></table></div>
+        <div className="tip">
+          Lo más revelador es <b>"% que llamó"</b> y <b>"abiertas sin llamar"</b>: el que trabaja tiene un porcentaje alto porque llama a casi todo lo que abre.
+          El que abre 80 fichas y llama a 10 no está vendiendo, está mirando datos. Cruzá esto con la pestaña Asistencia para ver el cuadro completo de esa persona.
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ============ REGISTRO DE LLAMADAS 1x1 (admin) ============ */
+function RegistroLlamadas() {
+  const [llamadas, setLlamadas] = useState<any[]>([]);
+  const [fCaller, setFCaller] = useState(""), [fRes, setFRes] = useState("");
+  useEffect(() => { fetch("/api/llamadas").then((r) => (r.ok ? r.json() : { llamadas: [] })).then((d) => setLlamadas(d.llamadas ?? [])); }, []);
+
+  const callers = [...new Set(llamadas.map((l) => l.caller?.nombre).filter(Boolean))];
+  const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const filtradas = llamadas.filter((l) =>
+    (!fCaller || l.caller?.nombre === fCaller) && (!fRes || l.resultado === fRes));
+
+  return (
+    <div className="tarjeta">
+      <h2>Registro de llamadas · una por una</h2>
+      <p className="sub">Todas las llamadas de todos los callers: qué marcó, cuánto duró y a quién.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+        <select value={fCaller} onChange={(e) => setFCaller(e.target.value)} style={{ width: "auto" }}>
+          <option value="">Todos los callers</option>
+          {callers.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={fRes} onChange={(e) => setFRes(e.target.value)} style={{ width: "auto" }}>
+          <option value="">Todos los resultados</option>
+          {Object.entries(ETI).map(([k, v]) => <option key={k} value={k}>{v.txt}</option>)}
+        </select>
+        <span className="sub" style={{ marginLeft: "auto", alignSelf: "center" }}>{filtradas.length} llamada(s)</span>
+      </div>
+      <div className="tabla-scroll"><table><tbody>
+        <tr><th>Fecha/hora</th><th>Caller</th><th>Cliente</th><th>Spamer</th><th>Resultado</th><th>Motivo</th><th style={{ textAlign: "right" }}>Duración</th><th style={{ textAlign: "right" }}>Monto</th></tr>
+        {filtradas.map((l) => (
+          <tr key={l.id}>
+            <td className="mono" style={{ whiteSpace: "nowrap" }}>{new Date(l.creadoEn).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+            <td><b>{l.caller?.nombre ?? "—"}</b></td>
+            <td>{l.lead?.nombre ?? "—"}</td>
+            <td className="sub">{l.lead?.cargadoPor?.nombre ?? "—"}</td>
+            <td><span className="eti" style={{ color: eti(l.resultado).color, borderColor: eti(l.resultado).color }}>{eti(l.resultado).txt}</span></td>
+            <td className="sub">{l.motivo ?? "—"}</td>
+            <td className="mono" style={{ textAlign: "right" }}>{mmss(l.duracion ?? 0)}</td>
+            <td className="mono" style={{ textAlign: "right" }}>{l.monto ? soles(l.monto) : "—"}</td>
+          </tr>
+        ))}
+        {!filtradas.length && <tr><td colSpan={8} style={{ color: "var(--tinta2)" }}>Sin llamadas registradas.</td></tr>}
+      </tbody></table></div>
+      <div className="tip">Las llamadas cortas (menos de 20s) suelen ser cuelgues o buzón — cruzalas con la pestaña Seguridad si un caller tiene muchas.</div>
+    </div>
   );
 }

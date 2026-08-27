@@ -69,6 +69,10 @@ model Lead {
   proximoAviso  DateTime?
   avisosHoy     Int        @default(0)
   enLlamadaDesde DateTime? // lo marca el caller al confirmar que va a llamar
+  agendadoPara  DateTime?  // hora a la que el caller quedó en volver a llamar (VOLVER_A_LLAMAR)
+  reactivaEn    DateTime?  // los NO_CONTESTO se reactivan cada hora: cuándo vuelven a la cola
+  urgentePorSpamer DateTime? // el spamer marcó "llamar ahora" (cliente pidió llamada ya): prioridad máxima
+  viaContacto   String?    // "TEL" o "WSP": cómo debe contactarlo el caller (lo fija el spamer)
   cargadoPor    Usuario    @relation("cargador", fields: [cargadoPorId], references: [id])
   cargadoPorId  String
   asignadoA     Usuario    @relation("caller", fields: [asignadoAId], references: [id])
@@ -98,6 +102,7 @@ model Llamada {
   revisadoPor  String?
   revisadoEn   DateTime?
   nota         String?
+  motivo       String?  // por qué "no quiso" (motivo obligatorio al rechazar)
   duracion     Int      @default(0)  // segundos entre "voy a llamar" y el resultado
   abiertoEn    DateTime @default(now()) // cuándo confirmó que iba a llamar
   creadoEn     DateTime @default(now())
