@@ -11,16 +11,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     const s = await exigir("ADMIN", "CALLER");
     const id = Number((await ctx.params).id);
-    const { resultado, nota, monto, referencia, procesadorId, agendadoPara, motivo } = await req.json();
+    const { resultado, nota, monto, referencia, procesadorId, agendadoPara, motivo, seguimiento } = await req.json();
     if (!VALIDOS.includes(resultado)) return Response.json({ error: "Resultado inválido." }, { status: 400 });
 
-    // Sin monto no hay venta: es lo que después define la comisión.
+    // Aceptó con seguimiento (aceptó pero no pagó aún): monto 0, sin procesador.
+    const SEG = ["MISIO", "SE_FUE_A_0", "NO_BANCA"];
+    const conSeguimiento = resultado === "ACEPTO" && SEG.includes(seguimiento);
     const importe = Number(monto);
-    if (resultado === "ACEPTO" && (!Number.isFinite(importe) || importe <= 0)) {
+    // Si pagó, el monto define la comisión; si es seguimiento, va en 0.
+    if (resultado === "ACEPTO" && !conSeguimiento && (!Number.isFinite(importe) || importe <= 0)) {
       return Response.json({ error: "Para cerrar en “Aceptó” tenés que indicar cuánto pagó el cliente." }, { status: 400 });
     }
-    // Si hay procesadores de pago cargados, hay que decir quién procesó esta venta.
-    if (resultado === "ACEPTO" && !procesadorId) {
+    // Solo se exige procesador cuando efectivamente hubo pago.
+    if (resultado === "ACEPTO" && !conSeguimiento && !procesadorId) {
       const hay = await db.usuario.count({ where: { rol: "PROCESADOR", activo: true } });
       if (hay) return Response.json({ error: "Elegí quién procesó el pago." }, { status: 400 });
     }
@@ -51,7 +54,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       data: {
         leadId: id, callerId: s.id, resultado, nota: nota || null, duracion, abiertoEn,
         motivo: resultado === "NO_QUISO" ? String(motivo).trim().slice(0, 200) : null,
-        monto: resultado === "ACEPTO" ? importe : null,
+        monto: resultado === "ACEPTO" ? (conSeguimiento ? 0 : importe) : null,
         referencia: resultado === "ACEPTO" ? (referencia || null) : null,
         procesadorId: resultado === "ACEPTO" ? (procesadorId || null) : null,
         desdeIp: ip ?? null, agente: req.headers.get("user-agent")?.slice(0, 160) ?? null,
@@ -59,12 +62,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
     // NO_CONTESTO se reactiva en 1 hora; VOLVER_A_LLAMAR guarda la hora agendada.
     const reactivaEn = resultado === "NO_CONTESTO" ? new Date(Date.now() + 3600000) : null;
+    // "Se fue a 0" y "no banca": aceptado, pero vuelve a la cola para seguimiento (sombreado).
+    const segPersistente = (seguimiento === "SE_FUE_A_0" || seguimiento === "NO_BANCA") ? seguimiento : null;
     await db.lead.update({
       where: { id },
       data: {
         estado: resultado, intentos: { increment: 1 }, enLlamadaDesde: null,
         agendadoPara: resultado === "VOLVER_A_LLAMAR" ? agenda : null,
         reactivaEn,
+        seguimiento: resultado === "ACEPTO" ? segPersistente : null,
         urgentePorSpamer: null, // se atendió: se limpia la urgencia del spamer
       },
     });

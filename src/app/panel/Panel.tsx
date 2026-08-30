@@ -10,12 +10,12 @@ type Sesion = { id: string; usuario: string; nombre: string; rol: Rol };
 type Lead = {
   id: number; nombre: string; dni: string; telefono: string; nota?: string | null;
   estado: string; intentos: number; enLlamadaDesde?: string | null; creadoEn?: string; actualizadoEn?: string; dispositivo?: string | null; usuarioDisp?: string | null;
-  viaContacto?: string | null; agendadoPara?: string | null; reactivaEn?: string | null; urgentePorSpamer?: string | null;
+  viaContacto?: string | null; agendadoPara?: string | null; reactivaEn?: string | null; urgentePorSpamer?: string | null; seguimiento?: string | null;
   asignadoA: { nombre: string }; asignadoAId: string; cargadoPor: { nombre: string };
   llamadas: { id?: number; nota?: string | null; creadoEn: string; resultado?: string; duracion?: number; motivo?: string | null }[];
 };
 type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean; encargadoId?: string | null };
-type Llamada = { id: number; resultado: string; nota?: string | null; motivo?: string | null; duracion?: number; monto?: number | null; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
+type Llamada = { id: number; resultado: string; nota?: string | null; motivo?: string | null; duracion?: number; monto?: number | null; validada?: boolean; anulada?: boolean; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
 
 const ETI: Record<string, { txt: string; color: string }> = {
   PENDIENTE: { txt: "Sin llamar", color: "var(--petroleo)" },
@@ -232,7 +232,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: any; recargar: () => void; procesadores: Usuario[] }) {
   const [porConfirmar, setPorConfirmar] = useState<Lead | null>(null);
   const [nota, setNota] = useState(""), [msg, setMsg] = useState("");
-  const [cobro, setCobro] = useState<{ monto: string; referencia: string; procesadorId: string } | null>(null);
+  const [cobro, setCobro] = useState<{ paso: "saco" | "monto" | "sinplata"; monto: string; referencia: string; procesadorId: string } | null>(null);
   const [festejo, setFestejo] = useState<any>(null);
   const [volverMenu, setVolverMenu] = useState(false);
   const [agenda, setAgenda] = useState("");
@@ -300,7 +300,9 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
     urgenteAnterior.current = idActual;
   }, [urgente?.id]);
   const esVencida = (l: Lead) => idsVencidas.includes(l.id);
-  const esRepaso = (l: Lead) => l.estado === "NO_CONTESTO" || l.estado === "VOLVER_A_LLAMAR";
+  const enSeguimiento = (l: Lead) => l.estado === "ACEPTO" && !!l.seguimiento;
+  const esRepaso = (l: Lead) => l.estado === "NO_CONTESTO" || l.estado === "VOLVER_A_LLAMAR" || enSeguimiento(l);
+  const colorSeg = (l: Lead) => l.seguimiento === "SE_FUE_A_0" ? "#EDE3F7" : l.seguimiento === "NO_BANCA" ? "#FBF3D0" : undefined;
   // Orden de la cola:
   //  - Si hay vencidas: van arriba (bloquean la data nueva).
   //  - Si no: primero las SIN LLAMAR (data nueva), debajo las trabajadas (no contestó / volver a llamar).
@@ -348,45 +350,87 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
 
       {cobro && enCurso && (
         <div className="velo">
-          <div className="modal" style={{ maxWidth: 440 }}>
-            <span className="rotulo">Cerrando la venta</span>
-            <h2>¿Cuánto pagó el cliente?</h2>
-            <p className="sub">{enCurso.nombre} · DNI {enCurso.dni}</p>
-            <label htmlFor="mto">Monto cobrado en soles *</label>
-            <input id="mto" className="mono" inputMode="decimal" autoFocus
-                   style={{ fontSize: 26, fontWeight: 700, textAlign: "center" }}
-                   placeholder="0.00" value={cobro.monto}
-                   onChange={(e) => setCobro({ ...cobro, monto: e.target.value.replace(/[^\d.]/g, "") })} />
-            {!!Number(cobro.monto) && (
-              <p className="sub" style={{ textAlign: "center", marginTop: 6 }}>
-                Tu comisión: <b className="mono" style={{ color: "var(--acepto)", fontSize: 17 }}>
-                  S/ {(Number(cobro.monto) * 0.1).toFixed(2)}
-                </b>
-              </p>
-            )}
-            {!!procesadores.length && (
+          <div className="modal" style={{ maxWidth: 460 }}>
+            {cobro.paso === "saco" && (
               <>
-                <label htmlFor="proc">¿Quién procesó el pago? *</label>
-                <select id="proc" value={cobro.procesadorId} onChange={(e) => setCobro({ ...cobro, procesadorId: e.target.value })}>
-                  <option value="">Elegí el procesador…</option>
-                  {procesadores.map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
-                </select>
+                <span className="rotulo">Cerrando como aceptó</span>
+                <h2>¿Se le sacó algo al cliente?</h2>
+                <p className="sub">{enCurso.nombre} · DNI {enCurso.dni}</p>
+                <p className="sub" style={{ marginTop: 6 }}>A veces aceptan pero no tienen plata en el momento. Sé honesto: esto ayuda a hacerle seguimiento.</p>
+                <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                  <button className="btn" style={{ flex: 1, background: "var(--acepto)" }} onClick={() => setCobro({ ...cobro, paso: "monto" })}>✅ Sí, pagó</button>
+                  <button className="btn sec" style={{ flex: 1 }} onClick={() => setCobro({ ...cobro, paso: "sinplata" })}>No pagó (aún)</button>
+                </div>
+                <button className="btn sec chico" style={{ marginTop: 12 }} onClick={() => setCobro(null)}>Cancelar</button>
               </>
             )}
-            <label htmlFor="ref">N° de operación o voucher (opcional)</label>
-            <input id="ref" className="mono" placeholder="Ej: 0098234" value={cobro.referencia}
-                   onChange={(e) => setCobro({ ...cobro, referencia: e.target.value })} />
-            <div className="tip">Sin monto no se puede cerrar como “Aceptó”. Tu supervisor revisa y valida cada venta.</div>
-            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-              <button className="btn" style={{ flex: 1 }}
-                      disabled={!(Number(cobro.monto) > 0) || (!!procesadores.length && !cobro.procesadorId)}
-                      onClick={() => registrar(enCurso.id, "ACEPTO", {
-                        monto: Number(cobro.monto), referencia: cobro.referencia, procesadorId: cobro.procesadorId || null,
-                      })}>
-                Confirmar venta
-              </button>
-              <button className="btn sec" onClick={() => setCobro(null)}>Volver</button>
-            </div>
+
+            {cobro.paso === "monto" && (
+              <>
+                <span className="rotulo">Cerrando la venta</span>
+                <h2>¿Cuánto pagó el cliente?</h2>
+                <p className="sub">{enCurso.nombre} · DNI {enCurso.dni}</p>
+                <label htmlFor="mto">Monto cobrado en soles *</label>
+                <input id="mto" className="mono" inputMode="decimal" autoFocus
+                       style={{ fontSize: 26, fontWeight: 700, textAlign: "center" }}
+                       placeholder="0.00" value={cobro.monto}
+                       onChange={(e) => setCobro({ ...cobro, monto: e.target.value.replace(/[^\d.]/g, "") })} />
+                {!!Number(cobro.monto) && (
+                  <p className="sub" style={{ textAlign: "center", marginTop: 6 }}>
+                    Tu comisión: <b className="mono" style={{ color: "var(--acepto)", fontSize: 17 }}>
+                      S/ {(Number(cobro.monto) * 0.1).toFixed(2)}
+                    </b>
+                  </p>
+                )}
+                {!!procesadores.length && (
+                  <>
+                    <label htmlFor="proc">¿Quién procesó el pago? *</label>
+                    <select id="proc" value={cobro.procesadorId} onChange={(e) => setCobro({ ...cobro, procesadorId: e.target.value })}>
+                      <option value="">Elegí el procesador…</option>
+                      {procesadores.map((pr) => <option key={pr.id} value={pr.id}>{pr.nombre}</option>)}
+                    </select>
+                  </>
+                )}
+                <label htmlFor="ref">N° de operación o voucher (opcional)</label>
+                <input id="ref" className="mono" placeholder="Ej: 0098234" value={cobro.referencia}
+                       onChange={(e) => setCobro({ ...cobro, referencia: e.target.value })} />
+                <div className="tip">Tu supervisor revisa y valida cada venta.</div>
+                <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+                  <button className="btn" style={{ flex: 1 }}
+                          disabled={!(Number(cobro.monto) > 0) || (!!procesadores.length && !cobro.procesadorId)}
+                          onClick={() => registrar(enCurso.id, "ACEPTO", {
+                            monto: Number(cobro.monto), referencia: cobro.referencia, procesadorId: cobro.procesadorId || null,
+                          })}>
+                    Confirmar venta
+                  </button>
+                  <button className="btn sec" onClick={() => setCobro({ ...cobro, paso: "saco" })}>← Volver</button>
+                </div>
+              </>
+            )}
+
+            {cobro.paso === "sinplata" && (
+              <>
+                <span className="rotulo">Aceptó pero no pagó</span>
+                <h2>¿Qué pasó?</h2>
+                <p className="sub">{enCurso.nombre} · DNI {enCurso.dni}</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+                  <button className="btn sec" style={{ textAlign: "left" }}
+                          onClick={() => registrar(enCurso.id, "ACEPTO", { monto: 0, seguimiento: "MISIO" })}>
+                    😶 Misio — no tiene nada. <span className="sub">Queda cerrado.</span>
+                  </button>
+                  <button className="btn sec" style={{ textAlign: "left", borderColor: "#9b59b6" }}
+                          onClick={() => registrar(enCurso.id, "ACEPTO", { monto: 0, seguimiento: "SE_FUE_A_0" })}>
+                    🟣 Se fue a poner a 0 — va a volver. <span className="sub">Seguimiento (morado).</span>
+                  </button>
+                  <button className="btn sec" style={{ textAlign: "left", borderColor: "#d4a017" }}
+                          onClick={() => registrar(enCurso.id, "ACEPTO", { monto: 0, seguimiento: "NO_BANCA" })}>
+                    🟡 No quiso entrar a su banca. <span className="sub">Seguimiento (amarillo).</span>
+                  </button>
+                </div>
+                <div className="tip" style={{ marginTop: 10 }}>Cuenta como venta aceptada con monto S/0. Cuando el cliente pague, editás el monto desde “Mis llamadas”.</div>
+                <button className="btn sec chico" style={{ marginTop: 12 }} onClick={() => setCobro({ ...cobro, paso: "saco" })}>← Volver</button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -469,7 +513,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
             </div>
           ) : !volverMenu ? (
             <div className="resultados">
-              <button className="res a" onClick={() => setCobro({ monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "" })}>Aceptó</button>
+              <button className="res a" onClick={() => setCobro({ paso: "saco", monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "" })}>Aceptó</button>
               <button className="res x" onClick={() => setNoQuisoMenu(true)}>No quiso</button>
               <button className="res v" onClick={() => setVolverMenu(true)}>Volver a llamar</button>
             </div>
@@ -564,6 +608,24 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
   }, []);
   useEffect(() => { traer(); }, [traer]);
 
+  async function editarMonto(llamadaId: number, actual: number) {
+    const v = prompt("Nuevo monto en soles (el cliente pidió más o pagó):", String(actual ?? 0));
+    if (v === null) return;
+    const m = Number(v.replace(/[^\d.]/g, ""));
+    if (!Number.isFinite(m) || m < 0) return alert("Monto inválido.");
+    const r = await fetch("/api/llamadas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: llamadaId, monto: m }) });
+    const d = await r.json();
+    if (!r.ok) return alert(d.error ?? "No se pudo cambiar.");
+    traer();
+  }
+  async function reabrir(llamadaId: number) {
+    if (!confirm("¿Volver a poner este contacto en tu cola para llamarlo de nuevo?")) return;
+    const r = await fetch("/api/llamadas", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: llamadaId, reabrir: true }) });
+    const d = await r.json();
+    if (!r.ok) return alert(d.error ?? "No se pudo reabrir.");
+    traer();
+  }
+
   // Agrupo por contacto: la última llamada manda, las anteriores quedan como intentos.
   const porLead = new Map<number, Llamada[]>();
   llamadas.forEach((l) => porLead.set(l.leadId, [...(porLead.get(l.leadId) ?? []), l]));
@@ -608,7 +670,7 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
           <span className="sub" style={{ alignSelf: "center" }}>{filas.length} contacto(s)</span>
         </div>
         <div className="tabla-scroll"><table><tbody>
-          <tr><th>Última llamada</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Resultado</th><th>Motivo</th><th>Intentos</th></tr>
+          <tr><th>Última llamada</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Spamer</th><th>Resultado</th><th>Monto</th><th>Intentos</th><th /></tr>
           {filas.map((f) => (
             <Fragment key={f.ultima.leadId}>
               <tr>
@@ -618,11 +680,17 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
                 <td className="mono">{f.ultima.lead?.telefono}</td>
                 <td>{f.ultima.lead?.cargadoPor?.nombre ?? "—"}</td>
                 <td><span className="eti" style={{ color: eti(f.ultima.resultado).color, borderColor: eti(f.ultima.resultado).color }}>{eti(f.ultima.resultado).txt}</span></td>
-                <td className="sub">{f.ultima.motivo ?? "—"}</td>
+                <td className="mono">{f.ultima.resultado === "ACEPTO" ? soles(f.ultima.monto ?? 0) : (f.ultima.motivo ?? "—")}</td>
                 <td>
                   <button className="btn sec chico" onClick={() => setAbierto(abierto === f.ultima.leadId ? null : f.ultima.leadId)}>
                     {f.total} {abierto === f.ultima.leadId ? "▲" : "▼"}
                   </button>
+                </td>
+                <td>
+                  {!soyAdmin && !f.ultima.validada && !f.ultima.anulada && f.ultima.resultado === "ACEPTO" &&
+                    <button className="btn sec chico" onClick={() => editarMonto(f.ultima.id, f.ultima.monto ?? 0)}>Editar monto</button>}
+                  {!soyAdmin && !f.ultima.validada && !f.ultima.anulada && f.ultima.resultado === "NO_QUISO" &&
+                    <button className="btn sec chico" onClick={() => reabrir(f.ultima.id)}>Volver a llamar</button>}
                 </td>
               </tr>
               {abierto === f.ultima.leadId && f.intentos.map((i) => (
@@ -630,13 +698,13 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
                   <td className="mono" style={{ paddingLeft: 24 }}>{new Date(i.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
                   <td colSpan={4} style={{ color: "var(--tinta2)" }}>intento previo</td>
                   <td><span className="eti" style={{ color: eti(i.resultado).color, borderColor: eti(i.resultado).color }}>{eti(i.resultado).txt}</span></td>
-                  <td>{i.motivo ?? "—"}</td>
-                  <td />
+                  <td className="mono">{i.resultado === "ACEPTO" ? soles(i.monto ?? 0) : (i.motivo ?? "—")}</td>
+                  <td /><td />
                 </tr>
               ))}
             </Fragment>
           ))}
-          {!filas.length && <tr><td colSpan={8} style={{ color: "var(--tinta2)" }}>{q.trim() || filtro !== "todos" ? "No hay contactos que coincidan." : "Todavía no cerraste llamadas."}</td></tr>}
+          {!filas.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>{q.trim() || filtro !== "todos" ? "No hay contactos que coincidan." : "Todavía no cerraste llamadas."}</td></tr>}
         </tbody></table></div>
       </div>
     </>
@@ -710,7 +778,7 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
 
 /* ============ CARGA DE CONTACTOS ============ */
 function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => void }) {
-  const vacio = { nombre: "", dni: "", telefono: "", nota: "", asignadoA: "", dispositivo: "", usuarioDisp: "" };
+  const vacio = { nombre: "", dni: "", telefono: "", nota: "", asignadoA: "", dispositivo: "", usuarioDisp: "", urgente: false };
   const [f, setF] = useState(vacio);
   const [msg, setMsg] = useState<any>(null);
   const [carga, setCarga] = useState<any[]>([]);
@@ -773,6 +841,12 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
             <label>Usuario/cuenta de ese dispositivo</label>
             <input value={f.usuarioDisp} onChange={(e) => setF({ ...f, usuarioDisp: e.target.value })} placeholder="Ej: WhatsApp Business 2 (opcional)" />
           </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, border: `2px solid ${f.urgente ? "var(--noquiso)" : "var(--linea)"}`, borderRadius: 8, background: f.urgente ? "#FDEDEC" : undefined, cursor: "pointer" }}>
+              <input type="checkbox" checked={f.urgente} onChange={(e) => setF({ ...f, urgente: e.target.checked })} style={{ width: 20, height: 20 }} />
+              <span><b style={{ color: f.urgente ? "var(--noquiso)" : undefined }}>🚨 Llamar URGENTE</b> — el cliente quiere que lo llamen ahora mismo. Al caller le llega alerta de llamada urgente y se le bloquea todo hasta atenderlo.</span>
+            </label>
+          </div>
           <div>
             <label>Caller asignado <b style={{ color: "var(--noquiso)" }}>*</b></label>
             <select value={f.asignadoA} onChange={(e) => setF({ ...f, asignadoA: e.target.value })}>
@@ -811,7 +885,7 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         {msg?.avisos?.length > 0 && <div className="tip">{msg.avisos.join(" · ")}</div>}
         <button className="btn" style={{ marginTop: 14 }} disabled={faltan}
                 onClick={() => { enviar(f); setF({ ...vacio, asignadoA: f.asignadoA, dispositivo: f.dispositivo, usuarioDisp: f.usuarioDisp }); }}>
-          {faltan ? "Completá nombre, DNI, teléfono, dispositivo y caller" : "Guardar y avisar"}
+          {faltan ? "Completá nombre, DNI, teléfono, dispositivo y caller" : f.urgente ? "🚨 Guardar y avisar URGENTE" : "Guardar y avisar"}
         </button>
       </div>
 
@@ -1008,7 +1082,7 @@ function TablaLeads({ leads, admin, editable, usuarios, recargar }:
           </tr>
           {filtrados.map((l) => (
             <Fragment key={l.id}>
-            <tr>
+            <tr style={{ background: l.estado === "ACEPTO" && l.seguimiento === "SE_FUE_A_0" ? "#EDE3F7" : l.estado === "ACEPTO" && l.seguimiento === "NO_BANCA" ? "#FBF3D0" : undefined }}>
               <td className="mono">{String(l.id).padStart(4, "0")}</td>
               <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.actualizadoEn ?? l.creadoEn)}</td>
               <td><b>{l.nombre}</b></td>
@@ -1937,7 +2011,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
         <div className="tarjeta">
           <h2>A pagar por persona</h2>
           <p className="sub">
-            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta (callers: solo días con 5+ ventas) {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}.
+            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta validada {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}.
           </p>
           <div className="tabla-scroll"><table><tbody>
             <tr><th>Persona</th><th>Rol</th><th>Concepto</th><th>Operaciones</th><th>Base</th><th>%</th><th>Comisión</th><th>Validadas</th><th>S/ 10 c/u</th><th>Bono</th><th>Total</th></tr>
@@ -2423,7 +2497,7 @@ function Boleta({ datos, cerrar }: { datos: any; cerrar: () => void }) {
                 <td>{ROL[l.rol] ?? l.rol}</td>
                 <td className="sub">
                   {l.comision > 0 && <>comisión {soles(l.comision)}<br /></>}
-                  {l.fijo > 0 && <>{l.validadas} validada(s) → fijo {soles(l.fijo)} (callers: solo días con 5+ ventas)<br /></>}
+                  {l.fijo > 0 && <>{l.validadas} validada(s) → fijo {soles(l.fijo)}<br /></>}
                   {l.bono > 0 && <>bonos {soles(l.bono)}<br /></>}
                   {l.pagado < l.saldo && <b>queda pendiente {soles(l.saldo - l.pagado)}</b>}
                 </td>
@@ -2523,7 +2597,7 @@ function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) 
               <>
                 <tr><td>Ventas / data validada</td><td className="mono" style={{ textAlign: "right" }}>{validadas.length} de {detalle.length}</td></tr>
                 <tr><td>Comisión (% sobre lo vendido validado)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.comision)}</td></tr>
-                <tr><td>Pago fijo (S/ 10 por venta, solo días con {t.minVentasDia ?? 5}+ ventas)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.fijo)}</td></tr>
+                <tr><td>Pago fijo (S/ 10 por venta validada)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.fijo)}</td></tr>
                 <tr><td>Bono “El cielo es el límite”</td><td className="mono" style={{ textAlign: "right" }}>{t.bono ? soles(t.bono) : "—"}</td></tr>
               </>
             ) : (
@@ -2539,18 +2613,18 @@ function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) 
 
           {t.rol === "CALLER" && !!t.diasFijo?.length && (
             <>
-              <h3 style={{ marginTop: 18, fontSize: 15 }}>Fijo por día (mínimo {t.minVentasDia ?? 5} ventas para cobrarlo)</h3>
+              <h3 style={{ marginTop: 18, fontSize: 15 }}>Fijo por día (S/10 por cada venta validada)</h3>
               <table style={{ marginTop: 6 }}><tbody>
                 <tr><th>Día</th><th style={{ textAlign: "right" }}>Ventas validadas</th><th style={{ textAlign: "right" }}>Fijo</th></tr>
                 {t.diasFijo.map((d: any) => (
                   <tr key={d.dia} style={{ opacity: d.paga ? 1 : 0.55 }}>
                     <td className="mono">{new Date(d.dia + "T12:00:00").toLocaleDateString("es", { day: "2-digit", month: "2-digit" })}</td>
-                    <td className="mono" style={{ textAlign: "right", color: d.paga ? "var(--acepto)" : "var(--noquiso)" }}>{d.validadas}{d.paga ? "" : ` (faltó para ${t.minVentasDia ?? 5})`}</td>
+                    <td className="mono" style={{ textAlign: "right", color: "var(--acepto)" }}>{d.validadas}</td>
                     <td className="mono" style={{ textAlign: "right" }}>{d.paga ? soles(d.validadas * 10) : "—"}</td>
                   </tr>
                 ))}
               </tbody></table>
-              <p className="sub" style={{ marginTop: 6 }}>Los días con menos de {t.minVentasDia ?? 5} ventas no pagan el fijo de S/10 (la comisión del 10% sí se cobra igual).</p>
+              <p className="sub" style={{ marginTop: 6 }}>Se paga S/10 por cada venta validada, desde la primera.</p>
             </>
           )}
 

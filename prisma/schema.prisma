@@ -73,6 +73,7 @@ model Lead {
   reactivaEn    DateTime?  // los NO_CONTESTO se reactivan cada hora: cuándo vuelven a la cola
   urgentePorSpamer DateTime? // el spamer marcó "llamar ahora" (cliente pidió llamada ya): prioridad máxima
   viaContacto   String?    // "TEL" o "WSP": cómo debe contactarlo el caller (lo fija el spamer)
+  seguimiento   String?    // aceptado sin cobrar aún: "SE_FUE_A_0" (morado) o "NO_BANCA" (amarillo); null si cobró o misio
   cargadoPor    Usuario    @relation("cargador", fields: [cargadoPorId], references: [id])
   cargadoPorId  String
   asignadoA     Usuario    @relation("caller", fields: [asignadoAId], references: [id])

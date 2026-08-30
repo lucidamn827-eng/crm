@@ -12,7 +12,10 @@ export async function GET() {
     const s = await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     let where: any = {};
     if (s.rol === "CALLER") {
-      where = { asignadoAId: s.id, estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } };
+      where = { asignadoAId: s.id, OR: [
+        { estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } },
+        { estado: "ACEPTO" as any, seguimiento: { not: null } },  // aceptados en seguimiento (se fue a 0 / no banca)
+      ] };
     } else if (s.rol === "CARGADOR") {
       where = { cargadoPorId: s.id };
     } else if (s.rol === "ENCARGADO") {
@@ -108,17 +111,25 @@ export async function POST(req: Request) {
         continue;
       }
       const repetido = await db.lead.count({ where: { dni } });
+      const esUrgente = f.urgente === true;
       const lead = await db.lead.create({
         data: {
           nombre, dni, telefono, nota: f.nota || null,
           dispositivo, usuarioDisp: usuarioDisp || null,
           cargadoPorId: s.id, asignadoAId: destinoId,
+          // Urgente: nace como "volver a llamar" vencido ya, con prioridad máxima.
+          ...(esUrgente ? { estado: "VOLVER_A_LLAMAR" as any, urgentePorSpamer: new Date(), agendadoPara: new Date() } : {}),
         },
       });
       creados.push(lead.id);
       yaHoy.set(destinoId, cargaActual + 1);
       if (repetido) avisos.push(`${nombre}: cargado, pero ese DNI ya tenía ${repetido} contacto(s) con otro número`);
-      await avisarAsignacion(lead.id);
+      if (esUrgente) {
+        const { avisarUrgentePorSpamer } = await import("@/lib/notificaciones");
+        await avisarUrgentePorSpamer(lead.id, s.nombre, "TEL").catch(() => {});
+      } else {
+        await avisarAsignacion(lead.id);
+      }
     }
     await auditar(s, "Carga de contactos", `${creados.length} cargados, ${rechazados.length} rechazados`);
     return Response.json({ creados: creados.length, rechazados, avisos });
