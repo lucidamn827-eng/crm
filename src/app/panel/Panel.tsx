@@ -274,6 +274,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
   const idsVencidas: number[] = cola?.idsVencidas ?? [];
   const idsUrgentes: number[] = cola?.idsUrgentes ?? [];
   const hayVencidas = !!cola?.hayVencidas;
+  const hayUrgente = !!cola?.hayUrgente;
   const esUrgente = (l: Lead) => idsUrgentes.includes(l.id);
   const urgente = leads.find((l) => idsUrgentes.includes(l.id) && !l.enLlamadaDesde);
 
@@ -307,8 +308,8 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
   //  - Si hay vencidas: van arriba (bloquean la data nueva).
   //  - Si no: primero las SIN LLAMAR (data nueva), debajo las trabajadas (no contestó / volver a llamar).
   const prioridad = (l: Lead) => {
-    if (esUrgente(l)) return -1;                    // URGENTE (spamer): primerísimo
-    if (hayVencidas && esVencida(l)) return 0;      // vencidas
+    if (esUrgente(l)) return -1;                    // URGENTE (spamer): primerísimo, bloquea
+    if (esVencida(l)) return 0;                     // vencidas: recordatorio arriba (no bloquean)
     if (l.estado === "PENDIENTE") return 1;         // sin llamar
     return 2;                                       // trabajadas, abajo
   };
@@ -321,9 +322,9 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
   //  - Si no: la data nueva va en orden 1x1, y las trabajadas SIEMPRE se pueden
   //    volver a llamar (si el cliente le devolvió la llamada al caller).
   const puedeLlamarFicha = (l: Lead) => {
-    if (hayVencidas) return esVencida(l);
-    if (esRepaso(l)) return true;                                   // volver a llamar ya
-    if (l.estado === "PENDIENTE") return l.id === primeraNueva?.id; // data nueva en orden
+    if (hayUrgente) return esUrgente(l);                            // urgente del spamer: bloquea todo
+    if (esRepaso(l)) return true;                                   // volver a llamar ya (recordatorio, no bloquea)
+    if (l.estado === "PENDIENTE") return l.id === primeraNueva?.id; // data nueva en orden 1x1
     return false;
   };
   const primerLlamableId = primeraNueva?.id;
@@ -554,8 +555,8 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
 
       {hayVencidas && !urgente && !enCurso && (
         <div className="tarjeta" style={{ borderLeft: "5px solid var(--noquiso)", background: "#FDEDEC" }}>
-          <b style={{ color: "var(--noquiso)" }}>⏰ Tenés {cola?.totalVencidas} contacto(s) para volver a llamar ahora</b>
-          <p className="sub" style={{ marginTop: 4 }}>Cumplieron su hora. Llamálos a todos (en el orden que quieras) antes de seguir con data nueva.</p>
+          <b style={{ color: "var(--noquiso)" }}>⏰ Tenés {cola?.totalVencidas} contacto(s) para volver a llamar</b>
+          <p className="sub" style={{ marginTop: 4 }}>Cumplieron su hora — están arriba como recordatorio. Podés llamarlos o seguir con data nueva, vos decidís.</p>
         </div>
       )}
 
@@ -563,7 +564,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
         <h2>Mis pendientes · {pendientes.length}</h2>
         <p className="sub">
           {hayVencidas
-            ? "Primero los que ya cumplieron su hora (⏰). La data nueva se libera cuando los despaches."
+            ? "Arriba los que cumplieron su hora (⏰) como recordatorio. No bloquean: podés llamarlos o seguir con data nueva."
             : "Arriba la data nueva (se llama en orden, ▶). Abajo los que quedaron para volver a llamar — si el cliente te devuelve la llamada, tocá “Volver a llamar” y arranca el contador."}
         </p>
         <div className="tabla-scroll"><table><tbody>
@@ -572,7 +573,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
             const puede = puedeLlamarFicha(l);
             const vencida = esVencida(l);
             const repaso = esRepaso(l);
-            const esPrimeraNueva = l.id === primerLlamableId && !hayVencidas;
+            const esPrimeraNueva = l.id === primerLlamableId && !hayUrgente;
             const icono = vencida ? "⏰" : repaso ? "↻" : esPrimeraNueva ? "▶" : "";
             return (
             <tr key={l.id} style={{ opacity: puede ? 1 : 0.5, background: vencida ? "#FDEDEC" : undefined }}>
@@ -586,7 +587,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
               <td className="mono">{l.intentos}</td>
               <td>{puede
                 ? <button className="btn chico" disabled={!!enCurso} onClick={() => setPorConfirmar(l)}>{(vencida || repaso) ? "Volver a llamar" : "Llamar"}</button>
-                : <span className="sub">{l.estado === "PENDIENTE" && hayVencidas ? "bloqueada" : "en espera"}</span>}</td>
+                : <span className="sub">{l.estado === "PENDIENTE" && hayUrgente ? "bloqueada" : "en espera"}</span>}</td>
             </tr>
           );})}
           {!pendientes.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>No tenés contactos pendientes ahora. Si marcaste “no contestó”, esas fichas vuelven a la hora reprogramada.</td></tr>}

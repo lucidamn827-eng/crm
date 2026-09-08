@@ -7,8 +7,9 @@ import { db } from "@/lib/db";
  *    la ficha NO aparece en la cola y el caller sigue con data nueva.
  *  - "Volver a llamar" agenda una hora exacta (agendadoPara).
  *  - Cuando una o varias fichas VENCEN (reactivaEn <= ahora, o agendadoPara <= ahora),
- *    se BLOQUEA la data nueva: el caller solo puede llamar a esas fichas vencidas
- *    (elige el orden entre ellas). Al despacharlas todas, se libera la data nueva.
+ *    se muestran arriba como RECORDATORIO, pero NO bloquean: el caller puede seguir
+ *    llamando data nueva. (Antes bloqueaban; se quitó porque un vencido viejo trababa la cola.)
+ *  - SOLO el "llamar urgente" del spamer (urgentePorSpamer) bloquea la data nueva.
  *  - El loop de "no contestó" solo se corta con Aceptó o No quiso.
  */
 export async function estadoCola(callerId: string) {
@@ -36,16 +37,17 @@ export async function estadoCola(callerId: string) {
 
   const hayVencidas = vencidas.length > 0;
   const urgentes = vencidas.filter((l) => l.urgentePorSpamer);
+  const hayUrgente = urgentes.length > 0;
 
   return {
     ahora,
     totalNuevas: nuevas.length,
     totalEsperando: esperando.length,
     totalVencidas: vencidas.length,
-    hayVencidas,                          // si hay, se bloquea la data nueva
+    hayVencidas,                          // hay recordatorios vencidos (NO bloquean)
     idsVencidas: vencidas.map((l) => l.id),
     idsUrgentes: urgentes.map((l) => l.id), // marcados "llamar ahora" por el spamer
-    hayUrgente: urgentes.length > 0,
+    hayUrgente,                           // SOLO esto bloquea la data nueva
   };
 }
 
@@ -58,17 +60,16 @@ export async function puedeLlamar(callerId: string, leadId: number) {
   if (!lead || lead.asignadoAId !== callerId) return { ok: false, motivo: "Esa ficha no es tuya." };
 
   const c = await estadoCola(callerId);
-  const esVencida = c.idsVencidas.includes(leadId);
+  const esUrgente = c.idsUrgentes.includes(leadId);
   const esRepaso = lead.estado === "NO_CONTESTO" || lead.estado === "VOLVER_A_LLAMAR";
 
   // Las fichas ya trabajadas (no contestó / volver a llamar) SIEMPRE se pueden volver a
-  // llamar, aunque no haya llegado su hora: si el cliente le devolvió la llamada al caller,
-  // este la retoma en el momento y arranca el contador.
+  // llamar: los vencidos son un recordatorio, no un bloqueo.
   if (esRepaso) return { ok: true };
 
-  // Data NUEVA: si hay vencidas esperando, esas tienen prioridad y bloquean la data nueva.
-  if (c.hayVencidas) {
-    return { ok: false, motivo: `Tenés ${c.totalVencidas} contacto(s) para volver a llamar ahora. Llamálos antes de seguir con data nueva.` };
+  // Data NUEVA: SOLO se bloquea si hay un cliente URGENTE del spamer sin atender.
+  if (c.hayUrgente && !esUrgente) {
+    return { ok: false, motivo: "Tenés un cliente urgente que pidió que lo llames ya. Llamálo antes de seguir con data nueva." };
   }
 
   return { ok: true };
