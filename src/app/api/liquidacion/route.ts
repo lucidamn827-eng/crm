@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { exigir } from "@/lib/auth";
 import { lunesDeEstaSemana, bonoDe, siguienteMeta } from "@/lib/semana";
+import { devengado } from "@/lib/finanzas";
 
 const BASE = 0.10;        // comisión normal del caller
 const PRIMERO = 0.12;     // caller que ganó el ranking la semana pasada
@@ -146,7 +147,13 @@ export async function GET(req: Request) {
     }
 
     const yo = usuarios.find((u) => u.id === s.id)!;
-    return Response.json({ desde, mio: armar(yo as any) });
+    // Historial de semanas pasadas de este trabajador (mismas reglas que finanzas del admin).
+    let historial: { semana: string; ganado: number }[] = [];
+    try {
+      const { filas } = await devengado();
+      historial = (filas.find((f: any) => f.id === s.id)?.semanas ?? []);
+    } catch {}
+    return Response.json({ desde, mio: armar(yo as any), historial });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });

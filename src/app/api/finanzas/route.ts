@@ -10,7 +10,7 @@ export async function GET(req: Request) {
     const desde = url.searchParams.get("desde");
     const hasta = url.searchParams.get("hasta");
 
-    const { filas, ventas, pagos, usuarios } = await devengado();
+    const { filas, ventas, pagos, usuarios, historialSemanal } = await devengado();
     const gastos = await db.gasto.findMany({ orderBy: { fecha: "desc" } });
     const totalGastos = gastos.reduce((n, g) => n + g.monto, 0);
 
@@ -50,6 +50,7 @@ export async function GET(req: Request) {
         utilidad: vendidoTotal - totalGanado - totalGastos,
       },
       trabajadores: filas,
+      historialSemanal,
       gastos: gastos.map((g) => ({ id: g.id, concepto: g.concepto, monto: g.monto, fecha: g.fecha, categoria: g.categoria })),
       pagos: pagos.map((p) => ({ ...p, nombre: nombre(p.usuarioId) })),
     });

@@ -82,16 +82,27 @@ export async function devengado() {
   const anterior = (sem: string) => semanas[semanas.indexOf(sem) - 1] ?? null;
 
   const resumen = new Map<string, { comision: number; fijo: number; bono: number; operaciones: number; validadas: number }>();
+  // Ganado por trabajador EN CADA SEMANA (para el historial semanal de pagos).
+  const porSemana = new Map<string, Map<string, number>>(); // usuarioId -> (semana -> ganado)
+  const sumarSemana = (id: string | null | undefined, sem: string, valor: number) => {
+    if (!id || !valor) return;
+    const m = porSemana.get(id) ?? new Map<string, number>();
+    m.set(sem, (m.get(sem) ?? 0) + valor);
+    porSemana.set(id, m);
+  };
   // Desglose por día del caller: cuántas validó y si ese día llegó al mínimo de 5.
   const diasCaller = new Map<string, { dia: string; validadas: number; paga: boolean }[]>();
+  let semActual = ""; // la fija el loop de semanas
   const sumar = (id: string | null | undefined, campo: "comision" | "fijo" | "bono", valor: number, ops = 0, val = 0) => {
     if (!id || !valor && !ops && !val) return;
     const r = resumen.get(id) ?? { comision: 0, fijo: 0, bono: 0, operaciones: 0, validadas: 0 };
     r[campo] += valor; r.operaciones += ops; r.validadas += val;
     resumen.set(id, r);
+    sumarSemana(id, semActual, valor); // el ganado de esta semana (comision+fijo+bono)
   };
 
   for (const sem of semanas) {
+    semActual = sem;
     const vSem = ventas.filter((v) => semanaDe(v.creadoEn) === sem);
     const lSem = leads.filter((l) => semanaDe(l.creadoEn) === sem);
     const prev = anterior(sem);
@@ -180,10 +191,24 @@ export async function devengado() {
         detalle: detalleDe(u), equipo,
         diasFijo: diasCaller.get(u.id) ?? [],
         minVentasDia: MIN_VENTAS_DIA,
+        semanas: [...(porSemana.get(u.id) ?? new Map())].map(([semana, ganado]) => ({ semana, ganado })).sort((a, b) => b.semana.localeCompare(a.semana)),
       };
     })
     .filter((f) => f.ganado > 0 || f.pagado > 0)
     .sort((a, b) => b.saldo - a.saldo);
 
-  return { filas, ventas, pagos, usuarios };
+  // Historial semanal: por cada semana (lunes), todos los que ganaron algo esa semana.
+  const nombrePorId = new Map(usuarios.map((u) => [u.id, { nombre: u.nombre, rol: u.rol }]));
+  const semanasSet = new Set<string>();
+  porSemana.forEach((m) => m.forEach((_v, sem) => semanasSet.add(sem)));
+  const historialSemanal = [...semanasSet].sort((a, b) => b.localeCompare(a)).map((sem) => {
+    const trabajadores = [...porSemana.entries()]
+      .map(([id, m]) => ({ id, ganado: m.get(sem) ?? 0 }))
+      .filter((x) => x.ganado > 0)
+      .map((x) => ({ nombre: nombrePorId.get(x.id)?.nombre ?? "—", rol: nombrePorId.get(x.id)?.rol ?? "", ganado: x.ganado }))
+      .sort((a, b) => b.ganado - a.ganado);
+    return { semana: sem, total: trabajadores.reduce((n, t) => n + t.ganado, 0), trabajadores };
+  });
+
+  return { filas, ventas, pagos, usuarios, historialSemanal };
 }

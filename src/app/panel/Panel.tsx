@@ -1954,6 +1954,14 @@ function TablaCielo({ titulo, rol, gente, unidad }:
 
 /* ============ LIQUIDACIÓN ============ */
 const soles = (n: number) => `S/ ${(n ?? 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** "2026-08-24" (lunes) -> "24 – 30 ago" (lunes a domingo de esa semana). */
+const rangoSemana = (lunesISO: string) => {
+  const [a, m, d] = lunesISO.split("-").map(Number);
+  const lun = new Date(a, m - 1, d);
+  const dom = new Date(lun); dom.setDate(dom.getDate() + 6);
+  const f = (x: Date) => x.toLocaleDateString("es-PE", { day: "numeric", month: "short" });
+  return `${f(lun)} – ${f(dom)}`;
+};
 
 function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[] }) {
   const [d, setD] = useState<any>(null);
@@ -2135,6 +2143,22 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
         )}
       </div>
 
+      {Array.isArray(d.historial) && d.historial.length > 0 && (
+        <div className="tarjeta">
+          <h2>Lo que gané cada semana</h2>
+          <p className="sub">Tu ganancia de cada semana (lunes a domingo), de la más reciente a la más antigua.</p>
+          <div className="tabla-scroll" style={{ marginTop: 12 }}><table><tbody>
+            <tr><th>Semana</th><th style={{ textAlign: "right" }}>Ganado</th></tr>
+            {d.historial.map((h: any) => (
+              <tr key={h.semana}>
+                <td>{rangoSemana(h.semana)}{h.semana === d.desde?.slice(0, 10) ? <span className="sub"> · esta semana</span> : ""}</td>
+                <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: "var(--acepto)" }}>{soles(h.ganado)}</td>
+              </tr>
+            ))}
+          </tbody></table></div>
+        </div>
+      )}
+
       <div className="tarjeta">
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <h2>Detalle de mis operaciones</h2>
@@ -2211,7 +2235,7 @@ function VentanaEquipo({ encargado, asignables, usuarios, cerrar, guardar }:
 /* ============ FINANZAS (solo admin) ============ */
 function Finanzas() {
   const [d, setD] = useState<any>(null);
-  const [tab, setTab] = useState<"resumen" | "pagar" | "gastos" | "historial">("resumen");
+  const [tab, setTab] = useState<"resumen" | "pagar" | "gastos" | "semanal" | "historial">("resumen");
   const [gasto, setGasto] = useState({ concepto: "", monto: "", fecha: "", categoria: "" });
   const [desde, setDesde] = useState(""), [hasta, setHasta] = useState("");
   const [boleta, setBoleta] = useState<any>(null);
@@ -2234,7 +2258,7 @@ function Finanzas() {
       {boleta && <Boleta datos={boleta} cerrar={() => { setBoleta(null); traer(); }} />}
 
       <div className="tarjeta" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {([["resumen", "Resumen"], ["pagar", `Pagar (${d.trabajadores.filter((t: any) => t.saldo > 0.5).length})`], ["gastos", "Gastos"], ["historial", "Historial de pagos"]] as [any, string][])
+        {([["resumen", "Resumen"], ["pagar", `Pagar (${d.trabajadores.filter((t: any) => t.saldo > 0.5).length})`], ["gastos", "Gastos"], ["semanal", "📅 Por semana"], ["historial", "Historial de pagos"]] as [any, string][])
           .map(([k, t]) => (
             <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
           ))}
@@ -2356,6 +2380,36 @@ function Finanzas() {
           </tbody></table></div>
           {!!d.gastos?.length && <div className="tip">Total de gastos operativos: <b>{soles(d.resumen.operativos ?? 0)}</b> — ya descontados de tu utilidad.</div>}
         </div>
+      )}
+
+      {tab === "semanal" && (
+        <>
+          <div className="tarjeta">
+            <h2>Ganancias por semana</h2>
+            <p className="sub">Lo que ganó cada trabajador en cada semana (lunes a domingo). Sirve para ver cuánto te toca pagar por semana.</p>
+          </div>
+          {(!d.historialSemanal || !d.historialSemanal.length) && (
+            <div className="tarjeta"><p className="sub">Todavía no hay semanas con ganancias registradas.</p></div>
+          )}
+          {(d.historialSemanal ?? []).map((sem: any) => (
+            <div className="tarjeta" key={sem.semana}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <h3 style={{ fontSize: 16 }}>Semana del {rangoSemana(sem.semana)}</h3>
+                <span className="mono" style={{ marginLeft: "auto", fontWeight: 700, color: "var(--acepto)" }}>Total: {soles(sem.total)}</span>
+              </div>
+              <div className="tabla-scroll" style={{ marginTop: 10 }}><table><tbody>
+                <tr><th>Trabajador</th><th>Rol</th><th style={{ textAlign: "right" }}>Ganó</th></tr>
+                {sem.trabajadores.map((t: any, i: number) => (
+                  <tr key={i}>
+                    <td><b>{t.nombre}</b></td>
+                    <td className="sub">{ROL[t.rol] ?? t.rol}</td>
+                    <td className="mono" style={{ textAlign: "right", fontWeight: 600 }}>{soles(t.ganado)}</td>
+                  </tr>
+                ))}
+              </tbody></table></div>
+            </div>
+          ))}
+        </>
       )}
 
       {tab === "historial" && (
