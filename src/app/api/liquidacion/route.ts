@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { exigir } from "@/lib/auth";
 import { lunesDeEstaSemana, bonoDe, siguienteMeta } from "@/lib/semana";
-import { devengado } from "@/lib/finanzas";
+import { devengado, invalidarDevengado } from "@/lib/finanzas";
 
 const BASE = 0.10;        // comisión normal del caller
 const PRIMERO = 0.12;     // caller que ganó el ranking la semana pasada
@@ -173,6 +173,7 @@ export async function PATCH(req: Request) {
     if (referencia !== undefined) data.referencia = referencia || null;
 
     await db.llamada.update({ where: { id: Number(id) }, data });
+    invalidarDevengado(); // cambió una venta: recalcular en el próximo pedido
     await db.auditoria.create({
       data: { usuario: s.usuario, rol: s.rol, accion: "Venta revisada", detalle: `Llamada ${id}: ${JSON.stringify({ validada, anulada, monto })}` },
     });

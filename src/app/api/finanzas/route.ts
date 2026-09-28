@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { exigir } from "@/lib/auth";
-import { devengado, diaDe } from "@/lib/finanzas";
+import { devengado, invalidarDevengado, diaDe } from "@/lib/finanzas";
 
 /** Panel de finanzas: ventas por día, saldos por trabajador, gastos y pagos. */
 export async function GET(req: Request) {
@@ -69,6 +69,7 @@ export async function POST(req: Request) {
       return Response.json({ error: "No hay pagos para registrar." }, { status: 400 });
 
     const lote = `L${Date.now().toString(36).toUpperCase()}`;
+    invalidarDevengado();               // saldos frescos para calcular el pago
     const { filas } = await devengado();
 
     const creados = [];
@@ -90,6 +91,7 @@ export async function POST(req: Request) {
       });
       creados.push(nuevo);
     }
+    invalidarDevengado();               // el próximo GET verá los pagos recién hechos
 
     await db.auditoria.create({
       data: { usuario: s.usuario, rol: s.rol, accion: "Pago a trabajadores",

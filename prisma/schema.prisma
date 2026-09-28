@@ -85,6 +85,7 @@ model Lead {
   @@index([dni])
   @@index([asignadoAId, estado])
   @@index([proximoAviso])
+  @@index([cargadoPorId, creadoEn])
 }
 
 model Llamada {
@@ -111,6 +112,7 @@ model Llamada {
   agente       String?
 
   @@index([callerId, creadoEn])
+  @@index([resultado, anulada, creadoEn])
 }
 
 /// Bitácora de todo lo que hace cada persona: entradas, aperturas, resultados, inactividad.
