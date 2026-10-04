@@ -63,7 +63,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     sesion.rol === "PROCESADOR" ? [["liquidacion", "💵 Mi liquidación"]] :
     sesion.rol === "ENCARGADO" ? [["liquidacion", "💵 Mi liquidación"], ["todos", "Contactos de mi equipo"]] :
     sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
-    sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
+    sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["liquidacion", "💵 Mi liquidación"], ["cielo", "☁️ El cielo es el límite"]] :
     [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["finanzas", "📊 Finanzas"], ["meta", "🎯 Meta"], ["personal", "🔒 Mis finanzas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
 
   const marca =
@@ -103,7 +103,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 
   // Al entrar, le recordamos en qué puesto está: lo primero que ve al abrir la app.
   useEffect(() => {
-    if (!["CALLER", "CARGADOR"].includes(sesion.rol)) return;
+    if (sesion.rol !== "CALLER") return; // el spamer ya no compite por el 12%
     if (!new URLSearchParams(window.location.search).has("bienvenida")) return;
     window.history.replaceState({}, "", "/panel"); // que no reaparezca al recargar
 
@@ -1625,18 +1625,18 @@ function Ranking({ sesion }: { sesion: Sesion }) {
       {/* El admin ve todos los equipos; cada quien ve solo el suyo. */}
       {sesion.rol === "ADMIN"
         ? (d.equipos ?? []).map((eq: any) => (
-            <EquipoRanking key={eq.equipoId} eq={eq} sesion={sesion} mostrarCallers mostrarSpamers />
+            <EquipoRanking key={eq.equipoId} eq={eq} sesion={sesion} mostrarCallers />
           ))
         : <EquipoRanking eq={d} sesion={sesion}
-            mostrarCallers={sesion.rol === "CALLER"} mostrarSpamers={sesion.rol === "CARGADOR"} />
+            mostrarCallers={sesion.rol === "CALLER"} />
       }
     </>
   );
 }
 
 /* Ranking de un solo equipo. */
-function EquipoRanking({ eq, sesion, mostrarCallers, mostrarSpamers }:
-  { eq: any; sesion: Sesion; mostrarCallers?: boolean; mostrarSpamers?: boolean }) {
+function EquipoRanking({ eq, sesion, mostrarCallers }:
+  { eq: any; sesion: Sesion; mostrarCallers?: boolean }) {
   const min = eq.minEquipo ?? 3;
   const avisoChico = (n: number) => (
     <div className="tarjeta" style={{ background: "var(--papel)", borderLeft: "4px solid var(--ambar)" }}>
@@ -1658,14 +1658,6 @@ function EquipoRanking({ eq, sesion, mostrarCallers, mostrarSpamers }:
               <Premio vigentes={eq.bonoVigente?.caller} tabla={eq.callers} yo={sesion.id} />
             </>
           : avisoChico(eq.callers?.length ?? 0)
-      )}
-      {mostrarSpamers && (
-        eq.rankingSpamersActivo
-          ? <>
-              <Podio titulo="Spamers · más data subida" unidad="contactos" gente={eq.spamers} yo={sesion.id} />
-              <Premio vigentes={eq.bonoVigente?.spamer} tabla={eq.spamers} yo={sesion.id} />
-            </>
-          : (mostrarSpamers && (eq.spamers?.length ?? 0) >= 0 ? avisoChico(eq.spamers?.length ?? 0) : null)
       )}
     </>
   );
@@ -2020,7 +2012,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
         <div className="tarjeta">
           <h2>A pagar por persona</h2>
           <p className="sub">
-            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta validada {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}.
+            Comisiones {soles(d.totales.comisiones)} + S/ 10 por venta validada {soles(d.totales.fijos ?? 0)} + bonos {soles(d.totales.bonos)}{d.totales.incentivos > 0 ? ` + incentivo domingo ${soles(d.totales.incentivos)}` : ""}.
           </p>
           <div className="tabla-scroll"><table><tbody>
             <tr><th>Persona</th><th>Rol</th><th>Concepto</th><th>Operaciones</th><th>Base</th><th>%</th><th>Comisión</th><th>Validadas</th><th>S/ 10 c/u</th><th>Bono</th><th>Total</th></tr>
@@ -2097,6 +2089,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
           {[
             m.comision > 0 && `${soles(m.comision)} de comisión`,
             m.fijo > 0 && `${soles(m.fijo)} por ${m.validadas} venta(s) validada(s)`,
+            m.incentivo > 0 && `${soles(m.incentivo)} de incentivo domingo 🎁`,
             m.bono > 0 && `${soles(m.bono)} de bono`,
           ].filter(Boolean).join("  +  ") || "Todavía no sumaste esta semana"}
         </p>
@@ -2653,6 +2646,7 @@ function PredPago({ persona: t, cerrar }: { persona: any; cerrar: () => void }) 
                 <tr><td>Ventas / data validada</td><td className="mono" style={{ textAlign: "right" }}>{validadas.length} de {detalle.length}</td></tr>
                 <tr><td>Comisión (% sobre lo vendido validado)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.comision)}</td></tr>
                 <tr><td>Pago fijo (S/ 10 por venta validada)</td><td className="mono" style={{ textAlign: "right" }}>{soles(t.fijo)}</td></tr>
+                {t.rol === "CALLER" && t.incentivo > 0 && <tr><td>🎁 Incentivo domingo (5% extra)</td><td className="mono" style={{ textAlign: "right", color: "var(--acepto)" }}>{soles(t.incentivo)}</td></tr>}
                 <tr><td>Bono “El cielo es el límite”</td><td className="mono" style={{ textAlign: "right" }}>{t.bono ? soles(t.bono) : "—"}</td></tr>
               </>
             ) : (

@@ -42,6 +42,7 @@ export async function GET(req: Request) {
         comisiones: filas.reduce((n, f) => n + f.comision, 0),
         fijos: filas.reduce((n, f) => n + f.fijo, 0),
         bonos: filas.reduce((n, f) => n + f.bono, 0),
+        incentivos: filas.reduce((n, f) => n + (f.incentivo ?? 0), 0),
         totalGanado,
         totalPagado,
         porPagar: totalGanado - totalPagado,

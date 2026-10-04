@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { exigir } from "@/lib/auth";
 import { lunesDeEstaSemana, bonoDe, siguienteMeta } from "@/lib/semana";
-import { devengado, invalidarDevengado } from "@/lib/finanzas";
+import { devengado, invalidarDevengado, esDomingo, INCENTIVO_DOMINGO } from "@/lib/finanzas";
 
 const BASE = 0.10;        // comisión normal del caller
 const PRIMERO = 0.12;     // caller que ganó el ranking la semana pasada
@@ -37,15 +37,10 @@ export async function GET(req: Request) {
       }),
       db.llamada.findMany({
         where: { resultado: "ACEPTO", anulada: false, creadoEn: { gte: anterior, lt: desde } },
-        select: { callerId: true },
+        select: { callerId: true, creadoEn: true },
       }),
       db.lead.findMany({ where: { creadoEn: { gte: desde } }, select: { cargadoPorId: true } }),
     ]);
-
-    const leadsPrev = await db.lead.findMany({
-      where: { creadoEn: { gte: anterior, lt: desde } },
-      select: { cargadoPorId: true },
-    });
 
     // Campeón de la semana pasada: cobra 12% esta semana.
     const masFrecuente = (ids: string[]) => {
@@ -53,8 +48,9 @@ export async function GET(req: Request) {
       ids.forEach((id) => c.set(id, (c.get(id) ?? 0) + 1));
       return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
     };
-    const campeon = masFrecuente(prev.map((l) => l.callerId));                 // caller que ganó la semana pasada
-    const campeonSpamer = masFrecuente(leadsPrev.map((l) => l.cargadoPorId));  // spamer que ganó la semana pasada
+    // Campeón caller de la semana pasada: SOLO cuenta lunes a sábado (el domingo no entra al ranking).
+    const campeon = masFrecuente(prev.filter((l) => !esDomingo(l.creadoEn)).map((l) => l.callerId));
+    // Los spamers ya no compiten por el 12%: siempre cobran su 10% base.
 
     const validas = ventas.filter((v) => !v.anulada);
     const fila = (v: any) => ({
@@ -72,11 +68,14 @@ export async function GET(req: Request) {
         const bono = bonoDe("CALLER", mias.length);
         const validadas = mias.filter((v) => v.validada).length;
         const fijo = validadas * POR_VALIDADA;
+        // Incentivo domingo: 5% extra sobre lo vendido el domingo (solo caller).
+        const vendidoDomingo = mias.filter((v) => esDomingo(v.creadoEn)).reduce((n, v) => n + (v.monto ?? 0), 0);
+        const incentivo = vendidoDomingo * INCENTIVO_DOMINGO;
         return {
           id: u.id, nombre: u.nombre, rol: u.rol, concepto: "Comisión + S/ 10 por venta validada",
-          operaciones: mias.length, base: vendido, tasa, comision: vendido * tasa, bono,
+          operaciones: mias.length, base: vendido, tasa, comision: vendido * tasa, bono, incentivo,
           validadas, fijo, porValidada: POR_VALIDADA,
-          total: vendido * tasa + bono + fijo, siguiente: siguienteMeta("CALLER", mias.length),
+          total: vendido * tasa + bono + fijo + incentivo, siguiente: siguienteMeta("CALLER", mias.length),
           pendientes: mias.filter((v) => !v.validada).length,
           anuladas: ventas.filter((v) => v.callerId === u.id && v.anulada).length,
           detalle: ventas.filter((v) => v.callerId === u.id).map(fila),
@@ -114,7 +113,7 @@ export async function GET(req: Request) {
       const subidas = leadsSemana.filter((l) => l.cargadoPorId === u.id).length;
       const generadas = validas.filter((v) => v.lead?.cargadoPorId === u.id);
       const base = generadas.reduce((n, v) => n + (v.monto ?? 0), 0);
-      const tasa = campeonSpamer === u.id ? PRIMERO : BASE;
+      const tasa = BASE; // los spamers ya no tienen competencia por el 12%
       const bono = bonoDe("CARGADOR", subidas);
       const validadas = generadas.filter((v) => v.validada).length;
       const fijo = validadas * POR_VALIDADA;
