@@ -24,7 +24,7 @@ export async function GET() {
           asignadoA: { select: { id: true, nombre: true } },
           cargadoPor: { select: { nombre: true } },
         },
-        orderBy: { enLlamadaDesde: "asc" },
+        orderBy: { enLlamadaDesde: "desc" }, // la más reciente primero: es la que realmente está hablando
       }),
     ]);
 
@@ -33,12 +33,14 @@ export async function GET() {
       const conectado = !!c.sesionActual && !!c.ultimoLatido &&
         (ahora - new Date(c.ultimoLatido).getTime()) < MIN_INACTIVIDAD * 60000;
       const llamada = enLlamada.find((l) => l.asignadoA?.id === c.id);
+      const mins = llamada?.enLlamadaDesde ? (ahora - new Date(llamada.enLlamadaDesde).getTime()) / 60000 : 0;
       return {
         id: c.id, nombre: c.nombre, conectado,
         enLlamada: !!llamada,
         cliente: llamada?.nombre ?? null,
         spamer: llamada?.cargadoPor?.nombre ?? null,
         desde: llamada?.enLlamadaDesde ?? null,
+        colgada: mins > 30, // +30 min: casi seguro es una ficha que dejó abierta, no una llamada real
       };
     }).sort((a, b) => Number(b.enLlamada) - Number(a.enLlamada) || Number(b.conectado) - Number(a.conectado));
 

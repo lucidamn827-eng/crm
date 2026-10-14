@@ -23,6 +23,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
 
     if (tomar) {
+      // Cierra cualquier ficha que el caller haya dejado abierta sin resultado (colgada),
+      // para que no queden varias "en llamada" infladas en el monitor.
+      await db.lead.updateMany({ where: { asignadoAId: s.id, enLlamadaDesde: { not: null }, id: { not: id } }, data: { enLlamadaDesde: null } });
       await db.lead.update({ where: { id }, data: { enLlamadaDesde: new Date(), urgentePorSpamer: null } });
       await registrar(s, "abrio_ficha", { leadId: id, detalle: `${lead.nombre} · ${lead.telefono}`, ip });
       // Avisar al spamer que su data entró en llamada.

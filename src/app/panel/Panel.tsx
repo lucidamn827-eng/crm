@@ -239,13 +239,20 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
   const [agenda, setAgenda] = useState("");
   const [noQuisoMenu, setNoQuisoMenu] = useState(false);
   const [motivoOtro, setMotivoOtro] = useState("");
-  const enCurso = leads.find((l) => l.enLlamadaDesde);
+  const idsUrgentes: number[] = cola?.idsUrgentes ?? [];
+  const enCurso = leads.find((l) => l.enLlamadaDesde && !idsUrgentes.includes(l.id));
   useTicker(!!enCurso);
 
   async function tomar(id: number, si: boolean) {
-    await fetch(`/api/leads/${id}/tomar`, {
+    const r = await fetch(`/api/leads/${id}/tomar`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tomar: si }),
     });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      setMsg(j.error ?? "No se pudo abrir la ficha. Recargá e intentá de nuevo.");
+      setPorConfirmar(null);
+      return;
+    }
     setPorConfirmar(null);
     recargar();
   }
@@ -277,11 +284,10 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
   //  - Fichas esperando su hora: no aparecen (las oculta el servidor).
   //  - Data NUEVA: solo se llama si no hay vencidas.
   const idsVencidas: number[] = cola?.idsVencidas ?? [];
-  const idsUrgentes: number[] = cola?.idsUrgentes ?? [];
   const hayVencidas = !!cola?.hayVencidas;
   const hayUrgente = !!cola?.hayUrgente;
   const esUrgente = (l: Lead) => idsUrgentes.includes(l.id);
-  const urgente = leads.find((l) => idsUrgentes.includes(l.id) && !l.enLlamadaDesde);
+  const urgente = leads.find((l) => idsUrgentes.includes(l.id));
 
   // Cuando APARECE un cliente urgente (y el caller no está en llamada), avisar con
   // sonido + vibración para que no se le pase, aunque esté mirando otra cosa.
