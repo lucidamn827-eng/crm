@@ -12,7 +12,7 @@ export async function GET() {
     const s = await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     let where: any = {};
     if (s.rol === "CALLER") {
-      where = { asignadoAId: s.id, OR: [
+      where = { asignadoAId: s.id, archivadoEn: null, OR: [
         { estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } },
         { estado: "ACEPTO" as any, seguimiento: { not: null } },  // aceptados en seguimiento (se fue a 0 / no banca)
       ] };
@@ -26,16 +26,29 @@ export async function GET() {
     } else if (s.rol === "PROCESADOR") {
       where = { id: -1 }; // no maneja contactos
     }
-    const leads = await db.lead.findMany({
-      where: where as any,
-      include: { asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },
-                 llamadas: { orderBy: { creadoEn: "desc" }, take: (s.rol === "CARGADOR" || s.rol === "ADMIN" || s.rol === "ENCARGADO") ? 50 : 1 } },
-      // enLlamadaDesde y asignadoAId vienen por defecto al ser campos escalares
-      // El caller trabaja lo más viejo primero (la data se enfría);
-      // el resto ve lo último cargado arriba.
-      orderBy: s.rol === "CALLER" ? [{ estado: "asc" }, { creadoEn: "asc" }] : [{ creadoEn: "desc" }],
-      take: 500,
-    });
+    const incluir = { asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },
+                 llamadas: { orderBy: { creadoEn: "desc" as const }, take: (s.rol === "CARGADOR" || s.rol === "ADMIN" || s.rol === "ENCARGADO") ? 50 : 1 } };
+    let leads;
+    if (s.rol === "CALLER") {
+      // El caller puede tener cientos de "volver a llamar" viejos acumulados. Para que la
+      // DATA NUEVA (y los urgentes) nunca queden fuera del límite, traigo en dos partes:
+      // 1) TODA la data nueva (PENDIENTE) + urgentes, sin recortar.
+      // 2) Las trabajadas (no contestó / volver a llamar), lo más viejo primero, hasta completar.
+      const nuevasYurg = await db.lead.findMany({
+        where: { ...(where as any), OR: [{ estado: "PENDIENTE" as any }, { urgentePorSpamer: { not: null } }] },
+        include: incluir, orderBy: [{ creadoEn: "asc" }],
+      });
+      const trabajadas = await db.lead.findMany({
+        where: { ...(where as any), estado: { in: ["NO_CONTESTO", "VOLVER_A_LLAMAR"] as any }, urgentePorSpamer: null },
+        include: incluir, orderBy: [{ creadoEn: "asc" }], take: 400,
+      });
+      leads = [...nuevasYurg, ...trabajadas];
+    } else {
+      leads = await db.lead.findMany({
+        where: where as any, include: incluir,
+        orderBy: [{ creadoEn: "desc" }], take: 500,
+      });
+    }
     // El spamer y el admin necesitan ver cuánta data tiene hoy cada caller.
     const carga = (s.rol === "CARGADOR" || s.rol === "ADMIN") ? await resumenCarga() : undefined;
 

@@ -16,7 +16,7 @@ export async function estadoCola(callerId: string) {
   const ahora = new Date();
 
   const leads = await db.lead.findMany({
-    where: { asignadoAId: callerId, estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } },
+    where: { asignadoAId: callerId, archivadoEn: null, estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } },
     select: { id: true, estado: true, agendadoPara: true, reactivaEn: true, creadoEn: true, urgentePorSpamer: true },
   });
 

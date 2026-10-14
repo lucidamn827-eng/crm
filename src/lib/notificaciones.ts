@@ -174,6 +174,26 @@ export async function reiniciarContadores() {
   await db.lead.updateMany({ where: { avisosHoy: { gt: 0 } }, data: { avisosHoy: 0 } });
 }
 
+/**
+ * Archiva (saca de la cola, sin borrar) las fichas en "volver a llamar" / "no contestó"
+ * que llevan más de DIAS_ARCHIVO días sin cerrarse. Se pueden recuperar desde el admin.
+ * Se conserva el estado original para saber cómo reactivarlas.
+ */
+export const DIAS_ARCHIVO = 7;
+export async function archivarViejas() {
+  const limite = new Date(Date.now() - DIAS_ARCHIVO * 86400000);
+  const r = await db.lead.updateMany({
+    where: {
+      estado: { in: ["NO_CONTESTO", "VOLVER_A_LLAMAR"] as any },
+      archivadoEn: null,
+      urgentePorSpamer: null,          // nunca archivar un urgente pendiente
+      actualizadoEn: { lt: limite },   // sin movimiento en más de 7 días
+    },
+    data: { archivadoEn: new Date() },
+  });
+  return { archivadas: r.count };
+}
+
 
 /**
  * Felicitación al spamer cuando un caller cierra su data con "Aceptó".

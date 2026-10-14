@@ -1307,7 +1307,7 @@ function Avisos() {
 function Supervision() {
   const [d, setD] = useState<any>(null);
   const [dias, setDias] = useState(7);
-  const [tab, setTab] = useState<"equipo" | "spamers" | "asistencia" | "seguridad" | "llamadas" | "alertas" | "bitacora">("equipo");
+  const [tab, setTab] = useState<"equipo" | "spamers" | "asistencia" | "seguridad" | "llamadas" | "archivo" | "alertas" | "bitacora">("equipo");
   const [carga, setCarga] = useState<any>(null);
 
   const traerCarga = useCallback(() => {
@@ -1400,7 +1400,7 @@ function Supervision() {
           </button>
         ))}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {([["equipo", "Callers"], ["spamers", "Spamers"], ["asistencia", "Asistencia"], ["seguridad", "🛡️ Seguridad"], ["llamadas", "📋 Llamadas"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
+          {([["equipo", "Callers"], ["spamers", "Spamers"], ["asistencia", "Asistencia"], ["seguridad", "🛡️ Seguridad"], ["llamadas", "📋 Llamadas"], ["archivo", "🗄️ Archivo"], ["alertas", `Alertas (${d.sospechosas.length})`], ["bitacora", "Bitácora"]] as [any, string][]).map(([k, t]) => (
             <button key={k} className={`btn chico ${tab === k ? "" : "sec"}`} onClick={() => setTab(k)}>{t}</button>
           ))}
         </span>
@@ -1582,6 +1582,8 @@ function Supervision() {
       {tab === "seguridad" && <Seguridad />}
 
       {tab === "llamadas" && <RegistroLlamadas />}
+
+      {tab === "archivo" && <Archivo />}
 
       {tab === "bitacora" && (
         <div className="tarjeta">
@@ -3252,5 +3254,69 @@ function RegistroLlamadas() {
       </tbody></table></div>
       <div className="tip">Las llamadas cortas (menos de 20s) suelen ser cuelgues o buzón — cruzalas con la pestaña Seguridad si un caller tiene muchas.</div>
     </div>
+  );
+}
+
+/* ============ ARCHIVO: fichas viejas sacadas de la cola (admin) ============ */
+function Archivo() {
+  const [d, setD] = useState<any>(null);
+  const [q, setQ] = useState("");
+  const [msg, setMsg] = useState("");
+  const traer = () => fetch("/api/archivo").then((r) => (r.ok ? r.json() : null)).then(setD);
+  useEffect(() => { traer(); }, []);
+
+  async function archivarAhora() {
+    if (!confirm("¿Archivar ahora todas las fichas de “volver a llamar” y “no contestó” con más de 7 días sin movimiento?")) return;
+    const r = await fetch("/api/archivo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "archivar_ahora" }) });
+    const j = await r.json();
+    setMsg(r.ok ? `Se archivaron ${j.archivadas} ficha(s).` : (j.error ?? "No se pudo."));
+    traer();
+  }
+  async function recuperar(id: number) {
+    const r = await fetch("/api/archivo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accion: "recuperar", id }) });
+    if (r.ok) { setMsg("Ficha devuelta a la cola del caller."); traer(); }
+  }
+
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+  const norm = (t: string) => (t ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const term = norm(q.trim()), dig = q.replace(/\D/g, "");
+  const filas = (d.leads ?? []).filter((l: any) =>
+    !q.trim() || norm(l.nombre).includes(term) || (dig && (l.dni?.includes(dig) || l.telefono?.replace(/\D/g, "").includes(dig))));
+
+  return (
+    <>
+      <div className="tarjeta" style={{ background: "#F4F6F8" }}>
+        <b>🗄️ Archivo de fichas viejas.</b> Acá van las fichas de <b>“volver a llamar”</b> y <b>“no contestó”</b> que pasaron <b>{d.dias} días</b> sin cerrarse.
+        Salen de la cola de los callers para que no se sature, pero <b>no se borran</b>: podés recuperarlas cuando quieras.
+        El sistema las archiva solo cada día; con el botón de abajo lo hacés ahora mismo.
+        <div style={{ marginTop: 10 }}>
+          <button className="btn" onClick={archivarAhora}>Archivar las viejas ahora</button>
+        </div>
+        {msg && <div className="tip" style={{ marginTop: 8 }}>{msg}</div>}
+      </div>
+
+      <div className="tarjeta">
+        <h2>Archivadas · {d.total}</h2>
+        <input placeholder="Buscar por nombre, DNI o teléfono…" value={q} onChange={(e) => setQ(e.target.value)} style={{ margin: "8px 0" }} />
+        <div className="tabla-scroll"><table><tbody>
+          <tr><th>Archivada</th><th>Cargada</th><th>Contacto</th><th>DNI</th><th>Teléfono</th><th>Caller</th><th>Spamer</th><th>Estado</th><th>Intentos</th><th /></tr>
+          {filas.map((l: any) => (
+            <tr key={l.id}>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.archivadoEn)}</td>
+              <td className="mono" style={{ whiteSpace: "nowrap" }}>{fechaHora(l.creadoEn)}</td>
+              <td><b>{l.nombre}</b></td>
+              <td className="mono">{l.dni}</td>
+              <td className="mono">{l.telefono}</td>
+              <td>{l.asignadoA?.nombre ?? "—"}</td>
+              <td>{l.cargadoPor?.nombre ?? "—"}</td>
+              <td><span className="eti" style={{ color: eti(l.estado).color, borderColor: eti(l.estado).color }}>{eti(l.estado).txt}</span></td>
+              <td className="mono">{l.intentos}</td>
+              <td><button className="btn sec chico" onClick={() => recuperar(l.id)}>Recuperar</button></td>
+            </tr>
+          ))}
+          {!filas.length && <tr><td colSpan={10} style={{ color: "var(--tinta2)" }}>{q.trim() ? "No hay coincidencias." : "No hay fichas archivadas."}</td></tr>}
+        </tbody></table></div>
+      </div>
+    </>
   );
 }
