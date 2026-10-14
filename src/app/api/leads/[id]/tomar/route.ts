@@ -23,7 +23,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     }
 
     if (tomar) {
-      await db.lead.update({ where: { id }, data: { enLlamadaDesde: new Date() } });
+      await db.lead.update({ where: { id }, data: { enLlamadaDesde: new Date(), urgentePorSpamer: null } });
       await registrar(s, "abrio_ficha", { leadId: id, detalle: `${lead.nombre} · ${lead.telefono}`, ip });
       // Avisar al spamer que su data entró en llamada.
       await avisarInicioLlamada(id, s.nombre);

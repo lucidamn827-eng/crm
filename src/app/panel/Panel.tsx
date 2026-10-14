@@ -249,6 +249,10 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
     recargar();
   }
 
+  async function descartarUrgente(id: number) {
+    await fetch(`/api/leads/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ urgente: false }) });
+    recargar();
+  }
   async function registrar(id: number, resultado: string, extra: any = {}) {
     const r = await fetch(`/api/leads/${id}/resultado`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -549,7 +553,10 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
             El spamer coordinó que <b>{urgente.nombre}</b> quiere que lo llamen <b>YA</b>
             {urgente.viaContacto === "WSP" ? " por WhatsApp" : " por teléfono"}. Todo lo demás está bloqueado hasta que lo llames.
           </p>
-          <button className="btn" style={{ marginTop: 8, background: "var(--noquiso)" }} onClick={() => setPorConfirmar(urgente)}>Llamar al cliente urgente</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <button className="btn" style={{ background: "var(--noquiso)" }} onClick={() => setPorConfirmar(urgente)}>Llamar al cliente urgente</button>
+            <button className="btn sec chico" onClick={() => descartarUrgente(urgente.id)}>Ya lo llamé / quitar urgencia</button>
+          </div>
         </div>
       )}
 

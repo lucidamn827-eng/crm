@@ -4,7 +4,7 @@ import { exigir, auditar } from "@/lib/auth";
 /** Solo el admin corrige datos de una ficha (errores de carga, reasignaciones, estado). */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const s = await exigir("ADMIN", "CARGADOR");
+    const s = await exigir("ADMIN", "CARGADOR", "CALLER");
     const id = Number((await ctx.params).id);
     const b = await req.json();
 
@@ -16,12 +16,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (b.urgente !== undefined) {
       if (s.rol === "CARGADOR" && actual.cargadoPorId !== s.id)
         return Response.json({ error: "Esa ficha la cargó otra persona." }, { status: 403 });
-      // Quitar la urgencia (sin llamar): admin o el spamer dueño.
+      // Quitar la urgencia (sin llamar): admin, el spamer dueño, o el caller asignado.
       if (b.urgente === false) {
+        if (s.rol === "CALLER" && actual.asignadoAId !== s.id)
+          return Response.json({ error: "Esa ficha no es tuya." }, { status: 403 });
         const lead = await db.lead.update({ where: { id }, data: { urgentePorSpamer: null } });
         await auditar(s, "Urgencia cancelada", `Ficha ${id} · ${actual.nombre}`);
         return Response.json({ ok: true, lead });
       }
+      // El caller NO puede MARCAR urgente (solo quitarla); marcar es del spamer/admin.
+      if (s.rol === "CALLER") return Response.json({ error: "No podés marcar urgencias." }, { status: 403 });
       const via = b.viaContacto === "WSP" ? "WSP" : "TEL";
       const lead = await db.lead.update({
         where: { id },
@@ -71,6 +75,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
         return Response.json({ error: "Ya fue llamada: pedile la corrección al administrador." }, { status: 409 });
     }
 
+    // El caller no edita campos de la ficha (su única acción acá es quitar urgencia, ya resuelta arriba).
+    if (s.rol === "CALLER") return Response.json({ error: "No autorizado." }, { status: 403 });
     const permitidos = s.rol === "ADMIN"
       ? ["nombre", "dni", "telefono", "nota", "dispositivo", "usuarioDisp", "asignadoAId", "estado"]
       : ["nombre", "dni", "telefono", "nota", "dispositivo", "usuarioDisp"];
@@ -89,7 +95,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const s = await exigir("ADMIN", "CARGADOR");
+    const s = await exigir("ADMIN", "CARGADOR", "CALLER");
     const id = Number((await ctx.params).id);
     const actual = await db.lead.findUnique({ where: { id } });
     if (!actual) return Response.json({ error: "La ficha no existe." }, { status: 404 });
