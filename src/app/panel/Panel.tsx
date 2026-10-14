@@ -240,7 +240,11 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
   const [noQuisoMenu, setNoQuisoMenu] = useState(false);
   const [motivoOtro, setMotivoOtro] = useState("");
   const idsUrgentes: number[] = cola?.idsUrgentes ?? [];
-  const enCurso = leads.find((l) => l.enLlamadaDesde && !idsUrgentes.includes(l.id));
+  // La ficha en llamada ahora = la de apertura MÁS RECIENTE (sea urgente o no).
+  // Así una ficha colgada vieja no tapa la que el caller abrió recién.
+  const enCurso = leads
+    .filter((l) => l.enLlamadaDesde)
+    .sort((a, b) => new Date(b.enLlamadaDesde!).getTime() - new Date(a.enLlamadaDesde!).getTime())[0] ?? undefined;
   useTicker(!!enCurso);
 
   async function tomar(id: number, si: boolean) {
