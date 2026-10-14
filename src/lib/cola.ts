@@ -36,7 +36,10 @@ export async function estadoCola(callerId: string) {
   );
 
   const hayVencidas = vencidas.length > 0;
-  const urgentes = vencidas.filter((l) => l.urgentePorSpamer);
+  // Un URGENTE lo es mientras tenga urgentePorSpamer seteado, SIN importar su hora.
+  // (Antes dependía de estar "vencida", lo que desincronizaba cartel y bloqueo.)
+  // Se limpia solo cuando el caller cierra la llamada de esa ficha.
+  const urgentes = leads.filter((l) => l.urgentePorSpamer);
   const hayUrgente = urgentes.length > 0;
 
   return {

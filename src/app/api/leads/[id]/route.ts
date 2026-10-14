@@ -16,6 +16,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     if (b.urgente !== undefined) {
       if (s.rol === "CARGADOR" && actual.cargadoPorId !== s.id)
         return Response.json({ error: "Esa ficha la cargó otra persona." }, { status: 403 });
+      // Quitar la urgencia (sin llamar): admin o el spamer dueño.
+      if (b.urgente === false) {
+        const lead = await db.lead.update({ where: { id }, data: { urgentePorSpamer: null } });
+        await auditar(s, "Urgencia cancelada", `Ficha ${id} · ${actual.nombre}`);
+        return Response.json({ ok: true, lead });
+      }
       const via = b.viaContacto === "WSP" ? "WSP" : "TEL";
       const lead = await db.lead.update({
         where: { id },
