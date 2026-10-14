@@ -60,8 +60,8 @@ function useTicker(activo: boolean) {
 
 export default function Panel({ sesion }: { sesion: Sesion }) {
   const pestanas: [string, string][] =
-    sesion.rol === "PROCESADOR" ? [["liquidacion", "💵 Mi liquidación"]] :
-    sesion.rol === "ENCARGADO" ? [["liquidacion", "💵 Mi liquidación"], ["todos", "Contactos de mi equipo"]] :
+    sesion.rol === "PROCESADOR" ? [["envivo", "📡 En vivo"], ["liquidacion", "💵 Mi liquidación"]] :
+    sesion.rol === "ENCARGADO" ? [["envivo", "📡 En vivo"], ["liquidacion", "💵 Mi liquidación"], ["todos", "Contactos de mi equipo"]] :
     sesion.rol === "CALLER" ? [["cola", "Mi cola"], ["historial", "Mis llamadas"], ["liquidacion", "💵 Mi liquidación"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]] :
     sesion.rol === "CARGADOR" ? [["cargar", "Cargar contactos"], ["mias", "Lo que subí"], ["liquidacion", "💵 Mi liquidación"], ["cielo", "☁️ El cielo es el límite"]] :
     [["monitor", "En vivo"], ["supervision", "Supervisión"], ["cargar", "Cargar contactos"], ["todos", "Todos los contactos"], ["usuarios", "Usuarios"], ["avisos", "Avisos"], ["liquidacion", "💵 Liquidación"], ["finanzas", "📊 Finanzas"], ["meta", "🎯 Meta"], ["personal", "🔒 Mis finanzas"], ["ranking", "🏆 Ranking"], ["cielo", "☁️ El cielo es el límite"]];
@@ -215,6 +215,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         {vista === "todos" && <TablaLeads leads={leads} admin editable="admin" usuarios={usuarios} recargar={cargar} />}
         {vista === "supervision" && <Supervision />}
         {vista === "monitor" && <Monitor leads={leads} usuarios={usuarios} recargar={cargar} />}
+        {vista === "envivo" && <EnVivo />}
         {vista === "usuarios" && <Usuarios usuarios={usuarios} recargar={cargar} />}
         {vista === "avisos" && <Avisos />}
         {vista === "ranking" && <Ranking sesion={sesion} />}
@@ -3315,6 +3316,55 @@ function Archivo() {
             </tr>
           ))}
           {!filas.length && <tr><td colSpan={10} style={{ color: "var(--tinta2)" }}>{q.trim() ? "No hay coincidencias." : "No hay fichas archivadas."}</td></tr>}
+        </tbody></table></div>
+      </div>
+    </>
+  );
+}
+
+/* ============ EN VIVO: monitor de callers para encargados y procesadores ============ */
+function EnVivo() {
+  const [d, setD] = useState<any>(null);
+  useTicker(true); // refresca el cronómetro cada segundo
+  useEffect(() => {
+    const traer = () => fetch("/api/envivo").then((r) => (r.ok ? r.json() : null)).then((x) => x && setD(x));
+    traer();
+    const t = setInterval(traer, 5000); // actividad al día: cada 5 segundos
+    return () => clearInterval(t);
+  }, []);
+  if (!d) return <div className="tarjeta">Cargando…</div>;
+
+  const seg = (iso?: string | null) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 1000) : 0;
+
+  return (
+    <>
+      <div className="grid4">
+        <div className="metrica"><span className="rotulo">En llamada ahora</span><b style={{ color: "var(--acepto)" }}>{d.enLlamada}</b></div>
+        <div className="metrica"><span className="rotulo">Conectados</span><b>{d.conectados}</b></div>
+        <div className="metrica"><span className="rotulo">Callers totales</span><b>{d.total}</b></div>
+      </div>
+
+      <div className="tarjeta">
+        <h2>Callers en vivo</h2>
+        <p className="sub">Se actualiza solo. Arriba los que están en llamada ahora.</p>
+        <div className="tabla-scroll"><table><tbody>
+          <tr><th>Caller</th><th>Estado</th><th>Cliente</th><th>Spamer</th><th style={{ textAlign: "right" }}>Hablando hace</th></tr>
+          {d.callers.map((c: any) => (
+            <tr key={c.id} style={{ background: c.enLlamada ? "#EAF7EE" : undefined }}>
+              <td><b>{c.nombre}</b></td>
+              <td>
+                {c.enLlamada
+                  ? <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>● En llamada</span>
+                  : c.conectado
+                    ? <span className="eti" style={{ color: "var(--petroleo)", borderColor: "var(--petroleo)" }}>Conectado</span>
+                    : <span className="sub">Desconectado</span>}
+              </td>
+              <td>{c.cliente ?? "—"}</td>
+              <td className="sub">{c.spamer ?? "—"}</td>
+              <td className="mono" style={{ textAlign: "right", fontWeight: c.enLlamada ? 700 : 400 }}>{c.enLlamada ? mmss(seg(c.desde)) : "—"}</td>
+            </tr>
+          ))}
+          {!d.callers.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>No hay callers activos.</td></tr>}
         </tbody></table></div>
       </div>
     </>
