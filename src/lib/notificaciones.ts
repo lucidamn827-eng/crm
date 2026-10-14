@@ -187,11 +187,29 @@ export async function archivarViejas() {
       estado: { in: ["NO_CONTESTO", "VOLVER_A_LLAMAR"] as any },
       archivadoEn: null,
       urgentePorSpamer: null,          // nunca archivar un urgente pendiente
-      actualizadoEn: { lt: limite },   // sin movimiento en más de 7 días
+      creadoEn: { lt: limite },        // cargada hace más de 7 días
     },
     data: { archivadoEn: new Date() },
   });
   return { archivadas: r.count };
+}
+
+/**
+ * Red de seguridad: corre archivarViejas como mucho una vez cada 6 horas,
+ * sin depender solo del cron. Se llama al cargar la cola.
+ */
+export async function archivarSiCorresponde() {
+  try {
+    const marca = await db.config.findUnique({ where: { clave: "ultimo_archivado" } });
+    const ultimo = marca ? Number(marca.valor) : 0;
+    if (Date.now() - ultimo < 6 * 3600000) return; // ya se corrió hace menos de 6h
+    await db.config.upsert({
+      where: { clave: "ultimo_archivado" },
+      create: { clave: "ultimo_archivado", valor: String(Date.now()) },
+      update: { valor: String(Date.now()) },
+    });
+    await archivarViejas();
+  } catch { /* best-effort: nunca romper la carga de la cola */ }
 }
 
 

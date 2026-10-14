@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { exigir, auditar } from "@/lib/auth";
-import { avisarAsignacion } from "@/lib/notificaciones";
+import { avisarAsignacion, archivarSiCorresponde } from "@/lib/notificaciones";
 import { dataDeHoy, topeDe, diaHoy, resumenCarga } from "@/lib/carga";
 import { estadoCola } from "@/lib/cola";
 
@@ -70,6 +70,7 @@ export async function GET() {
       : leads;
 
     // Estado de la cola del caller: vencidas, data nueva, esperando.
+    if (s.rol === "CALLER") { void archivarSiCorresponde(); } // red de seguridad: limpia solo cada 6h
     const cola = s.rol === "CALLER" ? await estadoCola(s.id) : undefined;
 
     return Response.json({ leads: salida, carga, cola });
