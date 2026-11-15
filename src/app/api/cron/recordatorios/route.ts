@@ -1,4 +1,4 @@
-import { correrRecordatorios, reiniciarContadores, archivarViejas } from "@/lib/notificaciones";
+import { correrRecordatorios, reiniciarContadores, archivarViejas, sancionarDesconectados } from "@/lib/notificaciones";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -20,5 +20,7 @@ export async function GET(req: Request) {
   }
 
   const r = await correrRecordatorios();
-  return Response.json({ ok: true, ...r, archivado, corridoEn: new Date().toISOString() });
+  // Control de presencia: restringe a los callers desconectados +20 min en horario laboral.
+  const sancion = await sancionarDesconectados().catch((e) => ({ error: String(e?.message ?? e) }));
+  return Response.json({ ok: true, ...r, archivado, sancion, corridoEn: new Date().toISOString() });
 }

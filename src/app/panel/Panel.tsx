@@ -14,7 +14,7 @@ type Lead = {
   asignadoA: { nombre: string }; asignadoAId: string; cargadoPor: { nombre: string };
   llamadas: { id?: number; nota?: string | null; creadoEn: string; resultado?: string; duracion?: number; motivo?: string | null }[];
 };
-type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean; encargadoId?: string | null };
+type Usuario = { id: string; usuario: string; nombre: string; rol: string; telefono?: string | null; telegramId?: string | null; codigoTg?: string | null; notificar: boolean; activo: boolean; encargadoId?: string | null; restringidoEn?: string | null };
 type Llamada = { id: number; resultado: string; nota?: string | null; motivo?: string | null; duracion?: number; monto?: number | null; validada?: boolean; anulada?: boolean; creadoEn: string; leadId: number; caller?: { nombre: string }; lead?: { nombre: string; dni: string; telefono: string; cargadoPor?: { nombre: string } } };
 
 const ETI: Record<string, { txt: string; color: string }> = {
@@ -160,6 +160,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
       .then((r) => {
         if (r.status === 409) router.push("/?m=desplazada");
         if (r.status === 440) router.push("/?m=inactividad");
+        if (r.status === 423) router.push("/?m=restringido");
       })
       .catch(() => {});
     latir();
@@ -1338,7 +1339,9 @@ function Usuarios({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () =>
                 )}
               </td>
               <td><button className="btn sec chico" onClick={() => editar(u.id, { notificar: !u.notificar })}>{u.notificar ? "Sí" : "No"}</button></td>
-              <td>{u.activo ? "Activo" : "Desactivado"}</td>
+              <td>{u.restringidoEn
+                ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }} title="Se le cortó el acceso por estar desconectado en horario laboral">🔒 Restringido</span>
+                : u.activo ? "Activo" : "Desactivado"}</td>
               <td><button className="btn sec chico" onClick={() => {
                 const clave = prompt(`Nueva contraseña para ${u.nombre} (mínimo 8 caracteres):`);
                 if (clave) editar(u.id, { clave });
@@ -3203,17 +3206,18 @@ function Asistencia() {
               {abierto === c.id && (
                 <tr><td colSpan={6} style={{ background: "var(--papel)" }}>
                   <table><tbody>
-                    <tr><th>Día</th><th>Entrada</th><th>1ra llamada</th><th style={{ textAlign: "right" }}>Llamadas</th><th /></tr>
+                    <tr><th>Día</th><th>Ingreso (1ra llamada)</th><th>Salida (última)</th><th>Abrió CRM</th><th style={{ textAlign: "right" }}>Llamadas</th><th /></tr>
                     {c.filas.map((f: any) => (
                       <tr key={f.dia}>
                         <td className="mono">{f.dia}</td>
                         <td className="mono" style={{ color: f.tarde ? "var(--noquiso)" : undefined }}>{f.entrada}{f.tarde ? ` (+${f.minutosTarde}m)` : ""}</td>
-                        <td className="mono">{f.primeraLlamada}</td>
+                        <td className="mono">{f.salida}</td>
+                        <td className="mono" style={{ color: "var(--tinta2)" }}>{f.abrioCrm}</td>
                         <td className="mono" style={{ textAlign: "right" }}>{f.llamadas}</td>
                         <td>{f.tarde ? "⏰ tarde" : f.entrada !== "—" ? "✓" : ""}</td>
                       </tr>
                     ))}
-                    {!c.filas.length && <tr><td colSpan={5} style={{ color: "var(--tinta2)" }}>Sin registros en el período.</td></tr>}
+                    {!c.filas.length && <tr><td colSpan={6} style={{ color: "var(--tinta2)" }}>Sin registros en el período.</td></tr>}
                   </tbody></table>
                 </td></tr>
               )}
@@ -3221,8 +3225,8 @@ function Asistencia() {
           ))}
         </tbody></table></div>
         <div className="tip">
-          Este registro sale del propio uso del sistema: la <b>entrada</b> es el primer ingreso al CRM del día y la <b>1ra llamada</b> es cuando empezó a trabajar de verdad.
-          Si alguien entra 9:00 pero su primera llamada es 9:40, ahí tenés la conversación para el encargado.
+          El <b>ingreso</b> se marca con la <b>primera llamada</b> del día (no con abrir el CRM): es cuando empezó a trabajar de verdad. La <b>salida</b> es su última llamada.
+          La columna <b>abrió CRM</b> queda solo de referencia. La tardanza se mide contra las {d.horaEntrada} (+{d.tolerancia} min de gracia) sobre la primera llamada.
         </div>
       </div>
     </>

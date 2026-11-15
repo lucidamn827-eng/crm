@@ -56,8 +56,11 @@ export async function exigir(...roles: Rol[]): Promise<Sesion> {
 
   const u = await db.usuario.findUnique({
     where: { id: s.id },
-    select: { activo: true, sesionActual: true, ultimoLatido: true },
+    select: { activo: true, sesionActual: true, ultimoLatido: true, restringidoEn: true },
   });
+  // Acceso restringido por desconexión en horario laboral: el panel manda al login con el aviso.
+  if (u?.restringidoEn)
+    throw new Response(JSON.stringify({ error: "restringido" }), { status: 423, headers: { "Content-Type": "application/json" } });
   if (!u?.activo) throw new Response("Usuario desactivado", { status: 401 });
   if (u.sesionActual && s.sid && u.sesionActual !== s.sid)
     throw new Response(JSON.stringify({ error: "desplazada" }), { status: 409, headers: { "Content-Type": "application/json" } });

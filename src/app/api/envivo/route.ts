@@ -29,11 +29,14 @@ export async function GET() {
     ]);
 
     const ahora = Date.now();
+    const CAP_LLAMADA = 30; // minutos: una llamada abierta más que esto ya no cuenta como "en curso" real
     const lista = callers.map((c) => {
-      const conectado = !!c.sesionActual && !!c.ultimoLatido &&
-        (ahora - new Date(c.ultimoLatido).getTime()) < MIN_INACTIVIDAD * 60000;
       const llamada = enLlamada.find((l) => l.asignadoA?.id === c.id);
       const mins = llamada?.enLlamadaDesde ? (ahora - new Date(llamada.enLlamadaDesde).getTime()) / 60000 : 0;
+      // En una llamada fresca cuenta como conectado aunque haya salido de la web a marcar del teléfono.
+      const enLlamadaFresca = !!llamada && mins < CAP_LLAMADA;
+      const conectado = enLlamadaFresca || (!!c.sesionActual && !!c.ultimoLatido &&
+        (ahora - new Date(c.ultimoLatido).getTime()) < MIN_INACTIVIDAD * 60000);
       return {
         id: c.id, nombre: c.nombre, conectado,
         enLlamada: !!llamada,

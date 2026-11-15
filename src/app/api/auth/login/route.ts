@@ -5,7 +5,16 @@ import { registrar, ipDe } from "@/lib/eventos";
 export async function POST(req: Request) {
   const { usuario, clave } = await req.json();
   const u = await db.usuario.findUnique({ where: { usuario: String(usuario ?? "").trim().toLowerCase() } });
-  if (!u || !u.activo || !(await verificarClave(String(clave ?? ""), u.hash))) {
+  if (!u || !(await verificarClave(String(clave ?? ""), u.hash))) {
+    return Response.json({ error: "Usuario o contraseña incorrectos." }, { status: 401 });
+  }
+  // Credenciales válidas pero con el acceso restringido por desconexión en horario laboral.
+  if (u.restringidoEn) {
+    return Response.json({
+      error: "Tu acceso fue restringido por mantenerte desconectado en horario laboral. Escribile al administrador para que te reactive el acceso.",
+    }, { status: 403 });
+  }
+  if (!u.activo) {
     return Response.json({ error: "Usuario o contraseña incorrectos." }, { status: 401 });
   }
 

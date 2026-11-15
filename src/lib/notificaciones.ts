@@ -304,3 +304,95 @@ export async function avisarUrgentePorSpamer(leadId: number, spamerNombre: strin
     ficha: lead,
   });
 }
+
+
+/* ===================================================================
+   Control de presencia: sanción por desconexión en horario laboral.
+   Solo callers. El reloj arranca con su PRIMERA LLAMADA del día.
+   Si pasan DESCONEXION_MIN minutos desconectados (y NO en llamada)
+   dentro del horario, se les corta el acceso y se avisa al admin.
+   =================================================================== */
+export const SANCION = {
+  horaIni: 9,          // 09:00 hora de operación: inicio del horario laboral
+  horaFin: 20,         // 20:00: fin del horario laboral
+  desconexionMin: 20,  // minutos desconectado para restringir el acceso
+  capLlamadaMin: 30,   // una ficha "en llamada" abierta más que esto ya no cuenta como actividad real
+};
+
+/** Minutos desde la medianoche en la zona de operación. */
+function minutosDelDiaOp(d = new Date()): number {
+  const s = new Intl.DateTimeFormat("en-US", { timeZone: zona(), hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+  const [h, m] = s.split(":").map(Number);
+  return (h % 24) * 60 + m;
+}
+/** Instante UTC de la medianoche local (zona de operación) del día de `d`. */
+function inicioDiaOp(d = new Date()): Date {
+  const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: zona(), year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  const asUTC = new Date(d.toLocaleString("en-US", { timeZone: "UTC" }));
+  const asOp = new Date(d.toLocaleString("en-US", { timeZone: zona() }));
+  const offsetMin = Math.round((asUTC.getTime() - asOp.getTime()) / 60000);
+  return new Date(new Date(`${ymd}T00:00:00.000Z`).getTime() + offsetMin * 60000);
+}
+
+export async function sancionarDesconectados() {
+  const ahora = new Date();
+  const min = minutosDelDiaOp(ahora);
+  // Fuera del horario laboral no se sanciona a nadie.
+  if (min < SANCION.horaIni * 60 || min >= SANCION.horaFin * 60)
+    return { corrido: false, motivo: "fuera de horario", restringidos: [] as string[] };
+
+  const callers = await db.usuario.findMany({
+    where: { rol: "CALLER", activo: true, restringidoEn: null },
+    select: { id: true, nombre: true, ultimoLatido: true },
+  });
+  if (!callers.length) return { corrido: true, restringidos: [] as string[] };
+  const ids = callers.map((c) => c.id);
+  const desdeHoy = inicioDiaOp(ahora);
+
+  // Su "ingreso" es la primera llamada del día: recién ahí empieza a correr el control.
+  const conLlamadaHoy = await db.llamada.findMany({
+    where: { callerId: { in: ids }, creadoEn: { gte: desdeHoy } },
+    select: { callerId: true }, distinct: ["callerId"],
+  });
+  const ingresaron = new Set(conLlamadaHoy.map((l) => l.callerId));
+
+  // En llamada "fresca" = cuenta como conectado aunque hayan salido de la web a marcar del teléfono.
+  const enLlamada = await db.lead.findMany({
+    where: { enLlamadaDesde: { gte: new Date(ahora.getTime() - SANCION.capLlamadaMin * 60000) } },
+    select: { asignadoAId: true },
+  });
+  const enCall = new Set(enLlamada.map((l) => l.asignadoAId));
+
+  const limite = ahora.getTime() - SANCION.desconexionMin * 60000;
+  const aRestringir = callers.filter((c) =>
+    ingresaron.has(c.id) &&
+    !enCall.has(c.id) &&
+    (!c.ultimoLatido || new Date(c.ultimoLatido).getTime() < limite)
+  );
+
+  const restringidos: string[] = [];
+  for (const c of aRestringir) {
+    await db.usuario.update({ where: { id: c.id }, data: { restringidoEn: ahora, activo: false, sesionActual: null } }).catch(() => {});
+    await db.evento.create({ data: { usuarioId: c.id, tipo: "restringido", detalle: `Desconectado ${SANCION.desconexionMin}+ min en horario laboral` } }).catch(() => {});
+    restringidos.push(c.nombre);
+  }
+
+  // Avisar al admin (o admins) por cada caller restringido.
+  if (restringidos.length) {
+    const admins = await db.usuario.findMany({
+      where: { rol: "ADMIN" },
+      select: { id: true, nombre: true, telegramId: true, telefono: true, ventanaHasta: true, notificar: true },
+    });
+    for (const a of admins) {
+      for (const nombre of restringidos) {
+        await enviarAviso({
+          destinatario: a,
+          tipo: "caller_restringido",
+          cuerpo: `🔒 ${nombre} quedó RESTRINGIDO: estuvo ${SANCION.desconexionMin}+ min desconectado en horario laboral. Entrá a Usuarios y reactivalo cuando te escriba.`,
+          parametros: [a.nombre, nombre],
+        }).catch(() => {});
+      }
+    }
+  }
+  return { corrido: true, restringidos };
+}

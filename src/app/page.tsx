@@ -12,6 +12,7 @@ function Formulario() {
   const aviso =
     motivo === "inactividad" ? "Por seguridad cerramos tu sesión tras 1 hora sin actividad. Volvé a entrar."
     : motivo === "desplazada" ? "Tu sesión se cerró porque entraste con esta cuenta en otro dispositivo."
+    : motivo === "restringido" ? "Tu acceso fue restringido por mantenerte desconectado en horario laboral. Escribile al administrador para que te reactive el acceso."
     : motivo === "vencida" ? "Tu sesión ya no es válida. Volvé a entrar."
     : "";
 

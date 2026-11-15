@@ -54,6 +54,7 @@ model Usuario {
   procesadas     Llamada[] @relation("procesador")
   pagos          Pago[]
   sesionActual   String?   // id de la única sesión válida: al entrar en otro lado, la anterior muere
+  restringidoEn  DateTime? // el sistema le cortó el acceso por estar desconectado en horario laboral; el admin lo reactiva
 }
 
 model Lead {

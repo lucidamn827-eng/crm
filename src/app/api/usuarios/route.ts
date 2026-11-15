@@ -5,7 +5,7 @@ export async function GET() {
   try {
     await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
     const usuarios = await db.usuario.findMany({
-      select: { id: true, usuario: true, nombre: true, rol: true, telefono: true, telegramId: true, codigoTg: true, notificar: true, activo: true, encargadoId: true },
+      select: { id: true, usuario: true, nombre: true, rol: true, telefono: true, telegramId: true, codigoTg: true, notificar: true, activo: true, encargadoId: true, restringidoEn: true },
       orderBy: { creadoEn: "asc" },
     });
     return Response.json({ usuarios });
@@ -42,7 +42,11 @@ export async function PATCH(req: Request) {
     const { id, activo, telefono, notificar, clave, rol, generarCodigo, equipo } = await req.json();
     const data: any = {};
     if (generarCodigo) data.codigoTg = Math.random().toString(36).slice(2, 8).toUpperCase();
-    if (activo !== undefined) data.activo = !!activo;
+    if (activo !== undefined) {
+      data.activo = !!activo;
+      // Reactivar levanta también la restricción automática por desconexión.
+      if (activo) data.restringidoEn = null;
+    }
     if (notificar !== undefined) data.notificar = !!notificar;
     if (telefono !== undefined) data.telefono = telefono ? String(telefono).replace(/\D/g, "") : null;
     if (rol) data.rol = rol;
