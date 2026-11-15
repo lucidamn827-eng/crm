@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 export const MAX_INTENTOS = 3;        // un "no contestó" se intenta hasta 3 veces
 export const LAPSO_REINTENTO_MIN = 120; // 2 h de descanso antes de volver al pool
 export const POSPONER_MIN = 5;        // al dar "Aún no", el contacto no reaparece por este rato
-const RESERVA_VENCE_MIN = 10;         // una reserva sin llamar se libera sola tras esto
+const RESERVA_VENCE_MIN = 20;         // una reserva abandonada (caller desconectado) vuelve al pool tras esto
 
 /** Cuántas fichas hay disponibles en el pool para llamar ahora. */
 export async function contarDisponibles(ahora = new Date()): Promise<number> {

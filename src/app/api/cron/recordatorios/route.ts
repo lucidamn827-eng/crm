@@ -1,4 +1,4 @@
-import { correrRecordatorios, reiniciarContadores, archivarViejas, sancionarDesconectados, avisarInactividadCallers } from "@/lib/notificaciones";
+import { correrRecordatorios, reiniciarContadores, archivarViejas, sancionarDesconectados, controlarReservasIdle } from "@/lib/notificaciones";
 import { liberarReservasViejas } from "@/lib/cola";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +21,11 @@ export async function GET(req: Request) {
   }
 
   const r = await correrRecordatorios();
-  // Pool: devolver al pool las reservas que quedaron colgadas sin llamar.
+  // Reserva ociosa: aviso (+5 min) y bloqueo (+15 min) si tiene un cliente reservado sin llamar.
+  const idle = await controlarReservasIdle().catch((e) => ({ error: String(e?.message ?? e) }));
+  // Pool: devolver al pool las reservas abandonadas (caller desconectado).
   const reservasLiberadas = await liberarReservasViejas().catch(() => 0);
-  // Presencia: aviso de inactividad (+5 min sin llamar) y restricción por desconexión (+20 min).
-  const inactividad = await avisarInactividadCallers().catch((e) => ({ error: String(e?.message ?? e) }));
+  // Presencia: restricción por desconexión (+20 min).
   const sancion = await sancionarDesconectados().catch((e) => ({ error: String(e?.message ?? e) }));
-  return Response.json({ ok: true, ...r, archivado, reservasLiberadas, inactividad, sancion, corridoEn: new Date().toISOString() });
+  return Response.json({ ok: true, ...r, archivado, idle, reservasLiberadas, sancion, corridoEn: new Date().toISOString() });
 }

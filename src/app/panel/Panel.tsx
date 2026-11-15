@@ -378,8 +378,27 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
     <>
       {msg && <div className="ok">{msg}</div>}
 
-      {reservada && idleMin >= 5 && (
-        <div className="error">⚠️ Llevás {idleMin} min sin dar “Llamar ahora”. Tus administradores están siendo notificados. Llamá al cliente para no recibir una sanción.</div>
+      {reservada && idleMin >= 5 && !posponiendo && (
+        <div className="velo" style={{ zIndex: 100 }}>
+          <div className="modal" style={{ maxWidth: 440, textAlign: "center", border: `3px solid ${idleMin >= 10 ? "var(--noquiso)" : "var(--ambar)"}` }}>
+            <div style={{ fontSize: 54, lineHeight: 1 }}>{idleMin >= 10 ? "🚫" : "⚠️"}</div>
+            {idleMin >= 10 ? (
+              <>
+                <h2 style={{ color: "var(--noquiso)" }}>El administrador fue notificado</h2>
+                <p className="sub" style={{ fontSize: 15 }}>Llevás {idleMin} min sin llamar. En {Math.max(1, 15 - idleMin)} min tu acceso será <b>bloqueado</b>. Llamá al cliente ahora mismo.</p>
+              </>
+            ) : (
+              <>
+                <h2 style={{ color: "#8a6d00" }}>Llamá al cliente</h2>
+                <p className="sub" style={{ fontSize: 15 }}>Llevás {idleMin} min sin dar “Llamar ahora”. Tus administradores están siendo notificados de la inactividad.</p>
+              </>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="btn" style={{ flex: 1 }} onClick={() => tomar(reservada.id, true)}>Llamar ahora</button>
+              <button className="btn sec" onClick={() => setPosponiendo(true)}>Aún no</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {cobro && enCurso && (
@@ -1888,6 +1907,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
   const [d, setD] = useState<any>(null);
   const [verDetalle, setVerDetalle] = useState(false);
   const [editandoProc, setEditandoProc] = useState<any>(null);
+  const [qVenta, setQVenta] = useState("");
   const procesadores = usuarios.filter((u) => u.rol === "PROCESADOR" && u.activo);
   const admin = sesion.rol === "ADMIN";
   const traer = useCallback(() => {
@@ -1969,9 +1989,17 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
         <div className="tarjeta">
           <h2>Ventas de la semana</h2>
           <p className="sub">Validá las que confirmaste y anulá las que se cayeron. Una venta anulada no paga a nadie ni suma al ranking.</p>
+          <input value={qVenta} onChange={(e) => setQVenta(e.target.value)} placeholder="Buscar por cliente, DNI, teléfono, caller, spamer o referencia…" style={{ marginBottom: 12 }} />
+          {(() => {
+            const norm = (x: string) => (x ?? "").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+            const q = norm(qVenta.trim());
+            const ventasFiltradas = q
+              ? d.ventas.filter((v: any) => norm([v.cliente, v.dni, v.telefono, v.caller, v.spamer, v.procesador, v.referencia].join(" ")).includes(q))
+              : d.ventas;
+            return (
           <div className="tabla-scroll"><table><tbody>
             <tr><th>Fecha</th><th>Cliente</th><th>Caller</th><th>Spamer</th><th>Procesador</th><th>Monto</th><th>Ref.</th><th>Estado</th><th /></tr>
-            {d.ventas.map((v: any) => (
+            {ventasFiltradas.map((v: any) => (
               <tr key={v.id} style={v.anulada ? { opacity: .55 } : undefined}>
                 <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
                 <td>{v.cliente}<br /><span className="mono sub">{v.dni}</span></td>
@@ -2000,8 +2028,10 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
                 </td>
               </tr>
             ))}
-            {!d.ventas.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>Sin ventas esta semana.</td></tr>}
+            {!ventasFiltradas.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>{d.ventas.length ? "Ninguna venta coincide con la búsqueda." : "Sin ventas esta semana."}</td></tr>}
           </tbody></table></div>
+            );
+          })()}
         </div>
       </>
     );
