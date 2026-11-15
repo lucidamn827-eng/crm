@@ -1,103 +1,83 @@
 import { db } from "@/lib/db";
 import { exigir, auditar } from "@/lib/auth";
-import { avisarAsignacion, archivarSiCorresponde } from "@/lib/notificaciones";
-import { dataDeHoy, topeDe, diaHoy, resumenCarga } from "@/lib/carga";
-import { estadoCola } from "@/lib/cola";
+import { archivarSiCorresponde } from "@/lib/notificaciones";
+import { dataSubidaHoy, topeSubidaDe } from "@/lib/carga";
+import { estadoColaCaller } from "@/lib/cola";
 
 const digitos = (t: string) => t.replace(/\D/g, "");
 
-/** GET: el caller ve su cola; carga y admin ven lo que corresponde. */
+/** GET: el caller ve su ficha actual (a ciegas) + seguimientos; carga/encargado/admin ven lo suyo. */
 export async function GET() {
   try {
     const s = await exigir("ADMIN", "CARGADOR", "CALLER", "ENCARGADO", "PROCESADOR");
-    let where: any = {};
+
     if (s.rol === "CALLER") {
-      where = { asignadoAId: s.id, archivadoEn: null, OR: [
-        { estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } },
-        { estado: "ACEPTO" as any, seguimiento: { not: null } },  // aceptados en seguimiento (se fue a 0 / no banca)
-      ] };
-    } else if (s.rol === "CARGADOR") {
+      // Su ficha actual: la que tiene reservada (alerta) o en llamada.
+      const mia = await db.lead.findFirst({
+        where: { asignadoAId: s.id, archivadoEn: null, OR: [{ reservadoEn: { not: null } }, { enLlamadaDesde: { not: null } }] },
+        orderBy: { enLlamadaDesde: "desc" },
+      });
+      // Seguimientos (aceptó sin cobrar): se conservan en su lista.
+      const seg = await db.lead.findMany({
+        where: { asignadoAId: s.id, estado: "ACEPTO", seguimiento: { not: null }, archivadoEn: null },
+        orderBy: { creadoEn: "desc" }, take: 50,
+      });
+      // A ciegas: mientras esté RESERVADA (no la tomó) no viaja nombre/DNI/teléfono/spamer.
+      // Al tomarla (en llamada) se destapan DNI y teléfono; el spamer recién al ACEPTAR.
+      const revelar = (l: any) => {
+        if (l.enLlamadaDesde) {
+          // Teléfono/DNI visibles para llamar; el spamer (nombre e id) NO viaja hasta aceptar.
+          return { ...l, cargadoPor: undefined, cargadoPorId: undefined, asignadoA: undefined };
+        }
+        return { id: l.id, estado: l.estado, creadoEn: l.creadoEn, reservadoEn: l.reservadoEn,
+                 enLlamadaDesde: null, nombre: "", dni: "", telefono: "", nota: null, viaContacto: null };
+      };
+      const segSeguro = seg.map((l) => ({ ...l, cargadoPor: undefined, cargadoPorId: undefined, asignadoA: undefined }));
+      const leads = [...(mia ? [revelar(mia)] : []), ...segSeguro];
+
+      if (mia || seg.length) void archivarSiCorresponde();
+      const cola = await estadoColaCaller(s.id);
+      return Response.json({ leads, cola });
+    }
+
+    // No-callers: listados de lectura.
+    let where: any = {};
+    if (s.rol === "CARGADOR") {
       where = { cargadoPorId: s.id };
     } else if (s.rol === "ENCARGADO") {
-      // Solo los contactos de la gente a su cargo.
       const equipo = await db.usuario.findMany({ where: { encargadoId: s.id }, select: { id: true } });
       const ids = equipo.map((u) => u.id);
       where = ids.length ? { OR: [{ asignadoAId: { in: ids } }, { cargadoPorId: { in: ids } }] } : { id: -1 };
     } else if (s.rol === "PROCESADOR") {
-      where = { id: -1 }; // no maneja contactos
+      where = { id: -1 };
     }
-    const incluir = { asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },
-                 llamadas: { orderBy: { creadoEn: "desc" as const }, take: (s.rol === "CARGADOR" || s.rol === "ADMIN" || s.rol === "ENCARGADO") ? 50 : 1 } };
-    let leads;
-    if (s.rol === "CALLER") {
-      // El caller puede tener cientos de "volver a llamar" viejos acumulados. Para que la
-      // DATA NUEVA (y los urgentes) nunca queden fuera del límite, traigo en dos partes:
-      // 1) TODA la data nueva (PENDIENTE) + urgentes, sin recortar.
-      // 2) Las trabajadas (no contestó / volver a llamar), lo más viejo primero, hasta completar.
-      const nuevasYurg = await db.lead.findMany({
-        where: { ...(where as any), OR: [{ estado: "PENDIENTE" as any }, { urgentePorSpamer: { not: null } }] },
-        include: incluir, orderBy: [{ creadoEn: "asc" }],
-      });
-      const trabajadas = await db.lead.findMany({
-        where: { ...(where as any), estado: { in: ["NO_CONTESTO", "VOLVER_A_LLAMAR"] as any }, urgentePorSpamer: null },
-        include: incluir, orderBy: [{ creadoEn: "asc" }], take: 400,
-      });
-      leads = [...nuevasYurg, ...trabajadas];
-    } else {
-      leads = await db.lead.findMany({
-        where: where as any, include: incluir,
-        orderBy: [{ creadoEn: "desc" }], take: 500,
-      });
-    }
-    // El spamer y el admin necesitan ver cuánta data tiene hoy cada caller.
-    const carga = (s.rol === "CARGADOR" || s.rol === "ADMIN") ? await resumenCarga() : undefined;
-
-    // SEGURIDAD: al caller no le mandamos DNI ni teléfono completos de su cola.
-    // Solo se destapan de la ficha que tiene EN LLAMADA (la que confirmó llamar).
-    // Así el número real nunca viaja al navegador hasta que abre la ficha, y cada
-    // apertura queda registrada — no se puede cosechar la lista desde la consola.
-    // Al caller se le tapan DNI/teléfono SOLO de la data nueva sin abrir (PENDIENTE).
-    // Las ya trabajadas (no contestó / volver a llamar) y la que está en llamada van
-    // completas: el spamer igual les escribe, y así el caller repasa con los datos.
-    // El caller ve TODAS sus fichas en juego (data nueva + no contestó + volver a llamar),
-    // incluso las que aún no vencieron: si el cliente le devuelve la llamada, las retoma
-    // en el momento. El bloqueo de data nueva cuando hay vencidas lo maneja el flag de cola,
-    // no ocultando fichas. Solo la data NUEVA sin abrir va con datos tapados.
-    const salida = s.rol === "CALLER"
-      ? leads.map((l) => (l.enLlamadaDesde || l.estado !== "PENDIENTE")
-          ? l
-          : { ...l, dni: "", telefono: "", dispositivo: null, usuarioDisp: null })
-      : leads;
-
-    // Estado de la cola del caller: vencidas, data nueva, esperando.
-    if (s.rol === "CALLER") { void archivarSiCorresponde(); } // red de seguridad: limpia solo cada 6h
-    const cola = s.rol === "CALLER" ? await estadoCola(s.id) : undefined;
-
-    return Response.json({ leads: salida, carga, cola });
+    const incluir = {
+      asignadoA: { select: { nombre: true } }, cargadoPor: { select: { nombre: true } },
+      llamadas: { orderBy: { creadoEn: "desc" as const }, take: 50 },
+    };
+    const leads = await db.lead.findMany({ where: where as any, include: incluir, orderBy: [{ creadoEn: "desc" }], take: 500 });
+    return Response.json({ leads });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
   }
 }
 
-/** POST: carga uno o varios contactos y avisa por WhatsApp al caller asignado. */
+/** POST: el spamer sube contactos al POOL (sin asignar caller). Tope diario por spamer. */
 export async function POST(req: Request) {
   try {
     const s = await exigir("ADMIN", "CARGADOR");
     const body = await req.json();
     const filas: any[] = Array.isArray(body.contactos) ? body.contactos : [body];
-    const callers = await db.usuario.findMany({ where: { rol: "CALLER", activo: true } });
-    if (!callers.length) return Response.json({ error: "No hay callers activos." }, { status: 400 });
+
+    // Tope de subida del spamer (los ADMIN no tienen tope).
+    let subidasHoy = s.rol === "CARGADOR" ? await dataSubidaHoy(s.id) : 0;
+    const tope = s.rol === "CARGADOR" ? await topeSubidaDe(s.id) : null;
+    if (tope !== null && subidasHoy >= tope) {
+      return Response.json({ error: `Llegaste a tu tope de subida de hoy (${tope}). Pedile al administrador que te habilite más.`, tope, hoy: subidasHoy }, { status: 409 });
+    }
 
     const creados: number[] = [], rechazados: string[] = [], avisos: string[] = [];
-    const dia = diaHoy();
-    // Precargo cuánto lleva hoy cada caller y su tope, para no consultar en cada fila.
-    const yaHoy = new Map<string, number>();
-    const topes = new Map<string, number>();
-    for (const c of callers) {
-      yaHoy.set(c.id, await dataDeHoy(c.id, dia));
-      topes.set(c.id, await topeDe(c.id, dia));
-    }
     for (const f of filas) {
       const nombre = String(f.nombre ?? "").trim();
       const dni = String(f.dni ?? "").trim();
@@ -108,45 +88,27 @@ export async function POST(req: Request) {
       if (digitos(dni).length < 6) { rechazados.push(`${nombre}: DNI inválido o vacío`); continue; }
       if (digitos(telefono).length < 6) { rechazados.push(`${nombre}: teléfono inválido o vacío`); continue; }
       if (!dispositivo) { rechazados.push(`${nombre}: falta indicar desde qué dispositivo se le escribió`); continue; }
-      // El DNI puede repetirse (misma persona, otro teléfono). Lo único que no se repite es el número.
+      // Cortar si en medio de la tanda se llegó al tope.
+      if (tope !== null && subidasHoy >= tope) { rechazados.push(`${nombre}: no se subió, llegaste a tu tope de hoy (${tope})`); continue; }
+      // El DNI puede repetirse (misma persona, otro teléfono). Lo único único es el número.
       if (await db.lead.findUnique({ where: { telefono } })) { rechazados.push(`${nombre}: ese teléfono ya está cargado`); continue; }
-      // La asignación es obligatoria: cada ficha nace con dueño.
-      const destinoId = String(f.asignadoA ?? "");
-      if (!destinoId || !callers.some((c: { id: string }) => c.id === destinoId)) {
-        rechazados.push(`${nombre}: falta elegir el caller`);
-        continue;
-      }
-      // Control de tope diario por caller (suma de todos los spamers).
-      const cargaActual = yaHoy.get(destinoId) ?? 0;
-      const tope = topes.get(destinoId) ?? 20;
-      if (cargaActual >= tope) {
-        const cName = callers.find((c: { id: string }) => c.id === destinoId)?.nombre ?? "el caller";
-        rechazados.push(`${nombre}: ${cName} ya llegó a su tope de hoy (${tope}). Pedí permiso al admin para subirle más.`);
-        continue;
-      }
+
       const repetido = await db.lead.count({ where: { dni } });
-      const esUrgente = f.urgente === true;
       const lead = await db.lead.create({
         data: {
           nombre, dni, telefono, nota: f.nota || null,
           dispositivo, usuarioDisp: usuarioDisp || null,
-          cargadoPorId: s.id, asignadoAId: destinoId,
-          // Urgente: nace como "volver a llamar" vencido ya, con prioridad máxima.
-          ...(esUrgente ? { estado: "VOLVER_A_LLAMAR" as any, urgentePorSpamer: new Date(), agendadoPara: new Date() } : {}),
+          cargadoPorId: s.id, asignadoAId: null, // ← pool: sin caller
+          estado: "PENDIENTE",
         },
       });
       creados.push(lead.id);
-      yaHoy.set(destinoId, cargaActual + 1);
+      subidasHoy++;
       if (repetido) avisos.push(`${nombre}: cargado, pero ese DNI ya tenía ${repetido} contacto(s) con otro número`);
-      if (esUrgente) {
-        const { avisarUrgentePorSpamer } = await import("@/lib/notificaciones");
-        await avisarUrgentePorSpamer(lead.id, s.nombre, "TEL").catch(() => {});
-      } else {
-        await avisarAsignacion(lead.id);
-      }
     }
-    await auditar(s, "Carga de contactos", `${creados.length} cargados, ${rechazados.length} rechazados`);
-    return Response.json({ creados: creados.length, rechazados, avisos });
+    await auditar(s, "Carga de contactos al pool", `${creados.length} cargados, ${rechazados.length} rechazados`);
+    const faltan = tope !== null ? Math.max(0, tope - subidasHoy) : null;
+    return Response.json({ creados: creados.length, rechazados, avisos, hoy: subidasHoy, tope, faltan });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });

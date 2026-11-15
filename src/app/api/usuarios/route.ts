@@ -39,8 +39,13 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const s = await exigir("ADMIN");
-    const { id, activo, telefono, notificar, clave, rol, generarCodigo, equipo } = await req.json();
+    const { id, activo, telefono, notificar, clave, rol, generarCodigo, equipo, topeCargaDiaria } = await req.json();
     const data: any = {};
+    // Tope de subida diaria de un spamer (persistente). null/"" = sin tope.
+    if (topeCargaDiaria !== undefined) {
+      const n = Number(topeCargaDiaria);
+      data.topeCargaDiaria = (topeCargaDiaria === null || topeCargaDiaria === "" || !Number.isFinite(n) || n <= 0) ? null : Math.floor(n);
+    }
     if (generarCodigo) data.codigoTg = Math.random().toString(36).slice(2, 8).toUpperCase();
     if (activo !== undefined) {
       data.activo = !!activo;

@@ -1,7 +1,5 @@
 import { db } from "@/lib/db";
 
-export const LIMITE_DIARIO = 20;
-
 const zona = () => process.env.TZ_OPERACION ?? "America/Lima";
 
 /** Día actual "YYYY-MM-DD" en hora de la operación (Perú). */
@@ -17,29 +15,48 @@ export function rangoDelDia(dia = diaHoy()): { desde: Date; hasta: Date } {
   return { desde, hasta };
 }
 
-/** Cuánta data se le subió HOY a un caller (sumando todos los spamers). */
-export async function dataDeHoy(callerId: string, dia = diaHoy()): Promise<number> {
+/* ===================================================================
+   SUBIDA DE DATA: ahora el tope es POR SPAMER (cuánto puede subir al día).
+   Lo fija el admin y persiste (Usuario.topeCargaDiaria). null = sin tope.
+   =================================================================== */
+
+/** Cuánta data SUBIÓ hoy un spamer (por cargadoPorId). */
+export async function dataSubidaHoy(spamerId: string, dia = diaHoy()): Promise<number> {
   const { desde, hasta } = rangoDelDia(dia);
-  return db.lead.count({ where: { asignadoAId: callerId, creadoEn: { gte: desde, lt: hasta } } });
+  return db.lead.count({ where: { cargadoPorId: spamerId, creadoEn: { gte: desde, lt: hasta } } });
 }
 
-/** El tope vigente de un caller hoy: el especial del admin, o el general (20). */
-export async function topeDe(callerId: string, dia = diaHoy()): Promise<number> {
-  const especial = await db.topeCarga.findUnique({ where: { callerId_dia: { callerId, dia } } });
-  return especial?.tope ?? LIMITE_DIARIO;
+/** Tope de subida de un spamer (persistente). null = sin tope. */
+export async function topeSubidaDe(spamerId: string): Promise<number | null> {
+  const u = await db.usuario.findUnique({ where: { id: spamerId }, select: { topeCargaDiaria: true } });
+  return u?.topeCargaDiaria ?? null;
 }
 
-/** Resumen por caller: cuánto lleva hoy y cuál es su tope. */
-export async function resumenCarga(dia = diaHoy()) {
+/** Resumen por spamer: cuánto subió hoy y su tope (para supervisión y para el propio spamer). */
+export async function resumenSubida(dia = diaHoy()) {
   const { desde, hasta } = rangoDelDia(dia);
-  const [callers, leadsHoy, topes] = await Promise.all([
-    db.usuario.findMany({ where: { rol: "CALLER", activo: true }, select: { id: true, nombre: true } }),
-    db.lead.groupBy({ by: ["asignadoAId"], where: { creadoEn: { gte: desde, lt: hasta } }, _count: true }),
-    db.topeCarga.findMany({ where: { dia } }),
+  const [spamers, hoy] = await Promise.all([
+    db.usuario.findMany({ where: { rol: "CARGADOR", activo: true }, select: { id: true, nombre: true, topeCargaDiaria: true } }),
+    db.lead.groupBy({ by: ["cargadoPorId"], where: { creadoEn: { gte: desde, lt: hasta } }, _count: true }),
   ]);
-  return callers.map((c) => {
-    const hoy = leadsHoy.find((l) => l.asignadoAId === c.id)?._count ?? 0;
-    const tope = topes.find((t) => t.callerId === c.id)?.tope ?? LIMITE_DIARIO;
-    return { id: c.id, nombre: c.nombre, hoy, tope, lleno: hoy >= tope };
+  return spamers.map((s) => {
+    const subidas = hoy.find((h) => h.cargadoPorId === s.id)?._count ?? 0;
+    const tope = s.topeCargaDiaria ?? null;
+    return {
+      id: s.id, nombre: s.nombre, hoy: subidas, tope,
+      lleno: tope !== null && subidas >= tope,
+      faltan: tope !== null ? Math.max(0, tope - subidas) : null,
+    };
   });
+}
+
+/** Conteos del POOL de data (solo lo que todavía no cerró): para el panel del admin. */
+export async function resumenPool() {
+  const base = { archivadoEn: null } as any;
+  const [sinLlamar, noContesto, noQuiso] = await Promise.all([
+    db.lead.count({ where: { ...base, estado: "PENDIENTE" } }),
+    db.lead.count({ where: { ...base, estado: "NO_CONTESTO" } }),
+    db.lead.count({ where: { ...base, estado: "NO_QUISO" } }),
+  ]);
+  return { sinLlamar, noContesto, noQuiso, total: sinLlamar + noContesto };
 }

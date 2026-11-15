@@ -1,4 +1,5 @@
-import { correrRecordatorios, reiniciarContadores, archivarViejas, sancionarDesconectados } from "@/lib/notificaciones";
+import { correrRecordatorios, reiniciarContadores, archivarViejas, sancionarDesconectados, avisarInactividadCallers } from "@/lib/notificaciones";
+import { liberarReservasViejas } from "@/lib/cola";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -20,7 +21,10 @@ export async function GET(req: Request) {
   }
 
   const r = await correrRecordatorios();
-  // Control de presencia: restringe a los callers desconectados +20 min en horario laboral.
+  // Pool: devolver al pool las reservas que quedaron colgadas sin llamar.
+  const reservasLiberadas = await liberarReservasViejas().catch(() => 0);
+  // Presencia: aviso de inactividad (+5 min sin llamar) y restricción por desconexión (+20 min).
+  const inactividad = await avisarInactividadCallers().catch((e) => ({ error: String(e?.message ?? e) }));
   const sancion = await sancionarDesconectados().catch((e) => ({ error: String(e?.message ?? e) }));
-  return Response.json({ ok: true, ...r, archivado, sancion, corridoEn: new Date().toISOString() });
+  return Response.json({ ok: true, ...r, archivado, reservasLiberadas, inactividad, sancion, corridoEn: new Date().toISOString() });
 }

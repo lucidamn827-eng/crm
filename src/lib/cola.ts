@@ -1,79 +1,80 @@
 import { db } from "@/lib/db";
 
-/**
- * Estado de la cola de un caller con el sistema de reprogramación por hora.
- * Reglas:
- *  - "No contestó" reprograma la ficha +1 hora (reactivaEn). Mientras no llegue esa hora,
- *    la ficha NO aparece en la cola y el caller sigue con data nueva.
- *  - "Volver a llamar" agenda una hora exacta (agendadoPara).
- *  - Cuando una o varias fichas VENCEN (reactivaEn <= ahora, o agendadoPara <= ahora),
- *    se muestran arriba como RECORDATORIO, pero NO bloquean: el caller puede seguir
- *    llamando data nueva. (Antes bloqueaban; se quitó porque un vencido viejo trababa la cola.)
- *  - SOLO el "llamar urgente" del spamer (urgentePorSpamer) bloquea la data nueva.
- *  - El loop de "no contestó" solo se corta con Aceptó o No quiso.
- */
-export async function estadoCola(callerId: string) {
-  const ahora = new Date();
+export const MAX_INTENTOS = 3;        // un "no contestó" se intenta hasta 3 veces
+export const LAPSO_REINTENTO_MIN = 120; // 2 h de descanso antes de volver al pool
+export const POSPONER_MIN = 5;        // al dar "Aún no", el contacto no reaparece por este rato
+const RESERVA_VENCE_MIN = 10;         // una reserva sin llamar se libera sola tras esto
 
-  const leads = await db.lead.findMany({
-    where: { asignadoAId: callerId, archivadoEn: null, estado: { in: ["PENDIENTE", "NO_CONTESTO", "VOLVER_A_LLAMAR"] as any } },
-    select: { id: true, estado: true, agendadoPara: true, reactivaEn: true, creadoEn: true, urgentePorSpamer: true },
-  });
-
-  const nuevas = leads.filter((l) => l.estado === "PENDIENTE");
-
-  // Fichas VENCIDAS: su hora ya llegó y hay que llamarlas ya.
-  const vencidas = leads.filter((l) => {
-    if (l.estado === "NO_CONTESTO" && l.reactivaEn && l.reactivaEn.getTime() <= ahora.getTime()) return true;
-    if (l.estado === "VOLVER_A_LLAMAR" && l.agendadoPara && l.agendadoPara.getTime() <= ahora.getTime()) return true;
-    return false;
-  });
-
-  // Fichas esperando su hora (no vencidas aún): no se muestran en la cola.
-  const esperando = leads.filter((l) =>
-    (l.estado === "NO_CONTESTO" && l.reactivaEn && l.reactivaEn.getTime() > ahora.getTime()) ||
-    (l.estado === "VOLVER_A_LLAMAR" && l.agendadoPara && l.agendadoPara.getTime() > ahora.getTime())
-  );
-
-  const hayVencidas = vencidas.length > 0;
-  // Un URGENTE lo es mientras tenga urgentePorSpamer seteado, SIN importar su hora.
-  // (Antes dependía de estar "vencida", lo que desincronizaba cartel y bloqueo.)
-  // Se limpia solo cuando el caller cierra la llamada de esa ficha.
-  const urgentes = leads.filter((l) => l.urgentePorSpamer);
-  const hayUrgente = urgentes.length > 0;
-
-  return {
-    ahora,
-    totalNuevas: nuevas.length,
-    totalEsperando: esperando.length,
-    totalVencidas: vencidas.length,
-    hayVencidas,                          // hay recordatorios vencidos (NO bloquean)
-    idsVencidas: vencidas.map((l) => l.id),
-    idsUrgentes: urgentes.map((l) => l.id), // marcados "llamar ahora" por el spamer
-    hayUrgente,                           // SOLO esto bloquea la data nueva
-  };
+/** Cuántas fichas hay disponibles en el pool para llamar ahora. */
+export async function contarDisponibles(ahora = new Date()): Promise<number> {
+  const [nuevas, reintentos] = await Promise.all([
+    db.lead.count({ where: { estado: "PENDIENTE", asignadoAId: null, archivadoEn: null, OR: [{ reactivaEn: null }, { reactivaEn: { lte: ahora } }] } }),
+    db.lead.count({ where: { estado: "NO_CONTESTO", asignadoAId: null, archivadoEn: null, intentos: { lt: MAX_INTENTOS }, reactivaEn: { lte: ahora } } }),
+  ]);
+  return nuevas + reintentos;
 }
 
-/** ¿Puede el caller ABRIR esta ficha ahora? */
-export async function puedeLlamar(callerId: string, leadId: number) {
-  const lead = await db.lead.findUnique({
-    where: { id: leadId },
-    select: { id: true, estado: true, asignadoAId: true, agendadoPara: true, reactivaEn: true },
+/** Estado de la cola del caller: su ficha actual (si tiene) y cuánto hay disponible. */
+export async function estadoColaCaller(callerId: string) {
+  const ahora = new Date();
+  const [disponibles, mia] = await Promise.all([
+    contarDisponibles(ahora),
+    db.lead.findFirst({
+      where: { asignadoAId: callerId, archivadoEn: null, OR: [{ reservadoEn: { not: null } }, { enLlamadaDesde: { not: null } }] },
+      select: { id: true, reservadoEn: true, enLlamadaDesde: true },
+    }),
+  ]);
+  return { disponibles, enLlamada: !!mia?.enLlamadaDesde, reservada: !!mia && !mia.enLlamadaDesde };
+}
+
+/**
+ * Reserva atómica del siguiente contacto para un caller.
+ * Prioridad: data nueva, la más antigua primero; si no hay, un "no contestó" vencido al azar.
+ * Devuelve el id reservado, o null si no hay nada.
+ */
+export async function reservarSiguiente(callerId: string): Promise<number | null> {
+  // Si ya tiene una ficha reservada o en llamada, devolvé esa (no repartas otra).
+  const yaTiene = await db.lead.findFirst({
+    where: { asignadoAId: callerId, archivadoEn: null, OR: [{ reservadoEn: { not: null } }, { enLlamadaDesde: { not: null } }] },
+    select: { id: true },
   });
-  if (!lead || lead.asignadoAId !== callerId) return { ok: false, motivo: "Esa ficha no es tuya." };
+  if (yaTiene) return yaTiene.id;
 
-  const c = await estadoCola(callerId);
-  const esUrgente = c.idsUrgentes.includes(leadId);
-  const esRepaso = lead.estado === "NO_CONTESTO" || lead.estado === "VOLVER_A_LLAMAR";
+  // 1) Data NUEVA, la más antigua primero (saltando las pospuestas con "Aún no").
+  const nueva = await reservarUna(callerId,
+    `SELECT id FROM "Lead"
+      WHERE estado = 'PENDIENTE' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
+        AND ("reactivaEn" IS NULL OR "reactivaEn" <= now())
+      ORDER BY "creadoEn" ASC
+      LIMIT 1 FOR UPDATE SKIP LOCKED`);
+  if (nueva) return nueva;
 
-  // Las fichas ya trabajadas (no contestó / volver a llamar) SIEMPRE se pueden volver a
-  // llamar: los vencidos son un recordatorio, no un bloqueo.
-  if (esRepaso) return { ok: true };
+  // 2) Un "no contestó" vencido (pasó el lapso, < 3 intentos), AL AZAR.
+  return reservarUna(callerId,
+    `SELECT id FROM "Lead"
+      WHERE estado = 'NO_CONTESTO' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
+        AND intentos < ${MAX_INTENTOS} AND "reactivaEn" IS NOT NULL AND "reactivaEn" <= now()
+      ORDER BY random()
+      LIMIT 1 FOR UPDATE SKIP LOCKED`);
+}
 
-  // Data NUEVA: SOLO se bloquea si hay un cliente URGENTE del spamer sin atender.
-  if (c.hayUrgente && !esUrgente) {
-    return { ok: false, motivo: "Tenés un cliente urgente que pidió que lo llames ya. Llamálo antes de seguir con data nueva." };
-  }
+/** UPDATE ... WHERE id = (subconsulta con FOR UPDATE SKIP LOCKED): reserva sin choques. */
+async function reservarUna(callerId: string, selectSql: string): Promise<number | null> {
+  const filas = await db.$queryRawUnsafe<{ id: number }[]>(
+    `UPDATE "Lead" SET "asignadoAId" = $1, "reservadoEn" = now()
+      WHERE id = (${selectSql})
+      RETURNING id`,
+    callerId
+  );
+  return filas.length ? Number(filas[0].id) : null;
+}
 
-  return { ok: true };
+/** Libera reservas viejas sin llamar (el caller se desconectó o no actuó): vuelven al pool. */
+export async function liberarReservasViejas(): Promise<number> {
+  const limite = new Date(Date.now() - RESERVA_VENCE_MIN * 60000);
+  const r = await db.lead.updateMany({
+    where: { reservadoEn: { not: null, lt: limite }, enLlamadaDesde: null },
+    data: { asignadoAId: null, reservadoEn: null },
+  });
+  return r.count;
 }

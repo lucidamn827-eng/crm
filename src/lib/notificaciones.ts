@@ -317,6 +317,7 @@ export const SANCION = {
   horaFin: 20,         // 20:00: fin del horario laboral
   desconexionMin: 20,  // minutos desconectado para restringir el acceso
   capLlamadaMin: 30,   // una ficha "en llamada" abierta más que esto ya no cuenta como actividad real
+  inactividadMin: 5,   // minutos sin llamar (conectado) para la advertencia
 };
 
 /** Minutos desde la medianoche en la zona de operación. */
@@ -324,6 +325,18 @@ function minutosDelDiaOp(d = new Date()): number {
   const s = new Intl.DateTimeFormat("en-US", { timeZone: zona(), hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
   const [h, m] = s.split(":").map(Number);
   return (h % 24) * 60 + m;
+}
+/** Día de la semana (0=domingo … 6=sábado) en la zona de operación. */
+function diaSemanaOp(d = new Date()): number {
+  const wd = new Intl.DateTimeFormat("en-US", { timeZone: zona(), weekday: "short" }).format(d);
+  return { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[wd as "Sun"] ?? 0;
+}
+/** ¿Estamos en horario laboral? Lunes a sábado, 09:00–20:00 (hora Perú). */
+export function enHorarioLaboral(d = new Date()): boolean {
+  const dw = diaSemanaOp(d);
+  if (dw === 0) return false; // domingo no se trabaja
+  const min = minutosDelDiaOp(d);
+  return min >= SANCION.horaIni * 60 && min < SANCION.horaFin * 60;
 }
 /** Instante UTC de la medianoche local (zona de operación) del día de `d`. */
 function inicioDiaOp(d = new Date()): Date {
@@ -336,9 +349,8 @@ function inicioDiaOp(d = new Date()): Date {
 
 export async function sancionarDesconectados() {
   const ahora = new Date();
-  const min = minutosDelDiaOp(ahora);
-  // Fuera del horario laboral no se sanciona a nadie.
-  if (min < SANCION.horaIni * 60 || min >= SANCION.horaFin * 60)
+  // Fuera del horario laboral (y los domingos) no se sanciona a nadie.
+  if (!enHorarioLaboral(ahora))
     return { corrido: false, motivo: "fuera de horario", restringidos: [] as string[] };
 
   const callers = await db.usuario.findMany({
@@ -395,4 +407,70 @@ export async function sancionarDesconectados() {
     }
   }
   return { corrido: true, restringidos };
+}
+
+
+/* ===================================================================
+   Aviso de inactividad: caller conectado que lleva +5 min sin llamar.
+   Le llega una advertencia y se notifica al admin. Cooldown por caller.
+   =================================================================== */
+export async function avisarInactividadCallers() {
+  const ahora = new Date();
+  if (!enHorarioLaboral(ahora)) return { corrido: false, avisados: [] as string[] };
+
+  const callers = await db.usuario.findMany({
+    where: { rol: "CALLER", activo: true, restringidoEn: null },
+    select: { id: true, nombre: true, ultimoLatido: true, telegramId: true, telefono: true, ventanaHasta: true, notificar: true },
+  });
+  if (!callers.length) return { corrido: true, avisados: [] as string[] };
+  const ids = callers.map((c) => c.id);
+  const desdeHoy = inicioDiaOp(ahora);
+  const corte = new Date(ahora.getTime() - SANCION.inactividadMin * 60000);
+
+  // Conectados (latido < 5 min) que NO están en llamada ni con ficha reservada.
+  const conectados = callers.filter((c) => c.ultimoLatido && (ahora.getTime() - new Date(c.ultimoLatido).getTime()) < 5 * 60000);
+  if (!conectados.length) return { corrido: true, avisados: [] as string[] };
+
+  const [ocupados, primeras, ultimas, yaAvisados] = await Promise.all([
+    db.lead.findMany({ where: { asignadoAId: { in: ids }, archivadoEn: null, OR: [{ reservadoEn: { not: null } }, { enLlamadaDesde: { not: null } }] }, select: { asignadoAId: true } }),
+    db.llamada.findMany({ where: { callerId: { in: ids }, creadoEn: { gte: desdeHoy } }, select: { callerId: true }, distinct: ["callerId"] }),
+    db.llamada.groupBy({ by: ["callerId"], where: { callerId: { in: ids } }, _max: { creadoEn: true } }),
+    // Cooldown: no repetir el aviso si ya se mandó en los últimos 15 min.
+    db.evento.findMany({ where: { usuarioId: { in: ids }, tipo: "aviso_inactivo", creadoEn: { gte: new Date(ahora.getTime() - 15 * 60000) } }, select: { usuarioId: true } }),
+  ]);
+  const ocupadoSet = new Set(ocupados.map((o) => o.asignadoAId));
+  const ingresaron = new Set(primeras.map((p) => p.callerId));
+  const ultimaLlamada = new Map(ultimas.map((u) => [u.callerId, u._max.creadoEn]));
+  const avisadoSet = new Set(yaAvisados.map((e) => e.usuarioId));
+
+  const aAvisar = conectados.filter((c) =>
+    ingresaron.has(c.id) &&            // ya arrancó (su primera llamada)
+    !ocupadoSet.has(c.id) &&           // no está llamando ni tiene una reservada
+    !avisadoSet.has(c.id) &&           // cooldown
+    (() => { const u = ultimaLlamada.get(c.id); return u ? new Date(u).getTime() < corte.getTime() : true; })()
+  );
+  if (!aAvisar.length) return { corrido: true, avisados: [] as string[] };
+
+  const admins = await db.usuario.findMany({
+    where: { rol: "ADMIN" },
+    select: { id: true, nombre: true, telegramId: true, telefono: true, ventanaHasta: true, notificar: true },
+  });
+  const avisados: string[] = [];
+  for (const c of aAvisar) {
+    await enviarAviso({
+      destinatario: c, tipo: "aviso_inactivo",
+      cuerpo: `⚠️ Llevás +${SANCION.inactividadMin} min sin llamar. Dale a "Llamar ahora" al siguiente cliente — los administradores están siendo notificados de la inactividad.`,
+      parametros: [c.nombre, String(SANCION.inactividadMin)],
+    }).catch(() => {});
+    await db.evento.create({ data: { usuarioId: c.id, tipo: "aviso_inactivo", detalle: "conectado sin llamar +5min" } }).catch(() => {});
+    for (const a of admins) {
+      await enviarAviso({
+        destinatario: a, tipo: "caller_inactivo",
+        cuerpo: `⚠️ ${c.nombre} lleva +${SANCION.inactividadMin} min conectado sin llamar.`,
+        parametros: [a.nombre, c.nombre],
+      }).catch(() => {});
+    }
+    avisados.push(c.nombre);
+  }
+  return { corrido: true, avisados };
 }

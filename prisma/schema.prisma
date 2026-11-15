@@ -55,6 +55,7 @@ model Usuario {
   pagos          Pago[]
   sesionActual   String?   // id de la única sesión válida: al entrar en otro lado, la anterior muere
   restringidoEn  DateTime? // el sistema le cortó el acceso por estar desconectado en horario laboral; el admin lo reactiva
+  topeCargaDiaria Int?     // máximo de data que este spamer puede SUBIR por día (null = sin tope). Lo fija el admin, persiste.
 }
 
 model Lead {
@@ -70,16 +71,18 @@ model Lead {
   proximoAviso  DateTime?
   avisosHoy     Int        @default(0)
   enLlamadaDesde DateTime? // lo marca el caller al confirmar que va a llamar
-  agendadoPara  DateTime?  // hora a la que el caller quedó en volver a llamar (VOLVER_A_LLAMAR)
-  reactivaEn    DateTime?  // los NO_CONTESTO se reactivan cada hora: cuándo vuelven a la cola
+  reservadoEn   DateTime?  // el sistema le reservó esta ficha a un caller para llamar (aún no la tomó)
+  agendadoPara  DateTime?  // (obsoleto) hora agendada del viejo "volver a llamar"
+  reactivaEn    DateTime?  // los NO_CONTESTO vuelven al pool recién a partir de esta hora (lapso de 2 h)
   urgentePorSpamer DateTime? // el spamer marcó "llamar ahora" (cliente pidió llamada ya): prioridad máxima
-  archivadoEn   DateTime?  // fichas viejas (+7 días en volver a llamar / no contestó) que se sacan de la cola; se conservan y se pueden recuperar
+  archivadoEn   DateTime?  // fichas viejas que se sacan de la cola; se conservan y se pueden recuperar
   viaContacto   String?    // "TEL" o "WSP": cómo debe contactarlo el caller (lo fija el spamer)
   seguimiento   String?    // aceptado sin cobrar aún: "SE_FUE_A_0" (morado) o "NO_BANCA" (amarillo); null si cobró o misio
   cargadoPor    Usuario    @relation("cargador", fields: [cargadoPorId], references: [id])
   cargadoPorId  String
-  asignadoA     Usuario    @relation("caller", fields: [asignadoAId], references: [id])
-  asignadoAId   String
+  // Pool: la data nace SIN caller (asignadoAId null). Se reserva a un caller al distribuirla.
+  asignadoA     Usuario?   @relation("caller", fields: [asignadoAId], references: [id])
+  asignadoAId   String?
   creadoEn      DateTime   @default(now())
   actualizadoEn DateTime   @updatedAt
   llamadas      Llamada[]
@@ -89,6 +92,7 @@ model Lead {
   @@index([proximoAviso])
   @@index([cargadoPorId, creadoEn])
   @@index([archivadoEn])
+  @@index([estado, archivadoEn, reservadoEn]) // selección del pool para distribuir
 }
 
 model Llamada {

@@ -31,10 +31,10 @@ export async function PATCH(req: Request) {
       if (llamada.callerId !== s.id) return Response.json({ error: "Esa llamada no es tuya." }, { status: 403 });
       if (llamada.validada || llamada.anulada) return Response.json({ error: "Esa venta ya fue revisada por el admin; pedile a él el cambio." }, { status: 409 });
 
-      // (b) Reabrir "no quiso": la ficha vuelve a la cola para volver a llamar.
+      // (b) Reabrir "no quiso": la ficha vuelve al POOL como "no contestó" para volver a llamar.
       if (reabrir) {
         if (llamada.resultado !== "NO_QUISO") return Response.json({ error: "Solo se puede reabrir un “no quiso”." }, { status: 400 });
-        await db.lead.update({ where: { id: llamada.leadId }, data: { estado: "VOLVER_A_LLAMAR" as any, agendadoPara: new Date(), reactivaEn: null } });
+        await db.lead.update({ where: { id: llamada.leadId }, data: { estado: "NO_CONTESTO" as any, asignadoAId: null, reservadoEn: null, enLlamadaDesde: null, reactivaEn: new Date(), intentos: 0 } });
         return Response.json({ ok: true });
       }
       // (a) Modificar el monto de un aceptado.

@@ -1,67 +1,47 @@
 import { db } from "@/lib/db";
-import { exigir, auditar } from "@/lib/auth";
-import { resumenCarga, diaHoy, LIMITE_DIARIO } from "@/lib/carga";
+import { exigir } from "@/lib/auth";
+import { resumenSubida, resumenPool, dataSubidaHoy, topeSubidaDe } from "@/lib/carga";
+import { enviarAviso } from "@/lib/avisos";
 
-/** Estado de carga de hoy + pedidos pendientes (para spamer y admin). */
+/** Estado de subida de hoy. El spamer ve lo suyo; el admin ve a todos + el pool. */
 export async function GET() {
   try {
     const s = await exigir("ADMIN", "CARGADOR");
-    const carga = await resumenCarga();
-    const dia = diaHoy();
-    const pedidos = await db.pedidoCarga.findMany({
-      where: { dia, estado: "PENDIENTE" },
-      orderBy: { creadoEn: "asc" },
+    if (s.rol === "ADMIN") {
+      const [spamers, pool] = await Promise.all([resumenSubida(), resumenPool()]);
+      return Response.json({ esAdmin: true, spamers, pool });
+    }
+    // Spamer: su propio estado de subida.
+    const [hoy, tope] = await Promise.all([dataSubidaHoy(s.id), topeSubidaDe(s.id)]);
+    const faltan = tope !== null ? Math.max(0, tope - hoy) : null;
+    return Response.json({
+      esAdmin: false,
+      hoy, tope, faltan,
+      lleno: tope !== null && hoy >= tope,
+      porLlegar: tope !== null && faltan !== null && faltan > 0 && faltan <= 5, // aviso 5 antes
     });
-    // Nombres para mostrar.
-    const ids = [...new Set(pedidos.flatMap((p) => [p.callerId, p.spamerId]))];
-    const gente = await db.usuario.findMany({ where: { id: { in: ids } }, select: { id: true, nombre: true } });
-    const nombre = (id: string) => gente.find((g) => g.id === id)?.nombre ?? "—";
-    const pedidosVista = pedidos.map((p) => ({ id: p.id, caller: nombre(p.callerId), spamer: nombre(p.spamerId), callerId: p.callerId }));
-
-    return Response.json({ carga, pedidos: pedidosVista, limite: LIMITE_DIARIO, esAdmin: s.rol === "ADMIN" });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
   }
 }
 
-/** El spamer pide permiso para subirle más a un caller lleno. */
-export async function POST(req: Request) {
+/** El spamer llegó a su tope y pide al admin que le habilite más subida por hoy. */
+export async function POST() {
   try {
-    const s = await exigir("CARGADOR", "ADMIN");
-    const { callerId } = await req.json();
-    if (!callerId) return Response.json({ error: "Falta el caller." }, { status: 400 });
-    const dia = diaHoy();
-    // Evita pedidos duplicados del mismo spamer para el mismo caller hoy.
-    const existe = await db.pedidoCarga.findFirst({ where: { callerId, spamerId: s.id, dia, estado: "PENDIENTE" } });
-    if (existe) return Response.json({ ok: true, yaEstaba: true });
-    await db.pedidoCarga.create({ data: { callerId, spamerId: s.id, dia } });
-    return Response.json({ ok: true });
-  } catch (e) {
-    if (e instanceof Response) return e;
-    return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
-  }
-}
-
-/** El admin resuelve un pedido: sube el tope de ese caller por hoy, o lo rechaza. */
-export async function PATCH(req: Request) {
-  try {
-    const s = await exigir("ADMIN");
-    const { pedidoId, callerId, aprobar, nuevoTope } = await req.json();
-    const dia = diaHoy();
-
-    if (aprobar) {
-      const tope = Number(nuevoTope) || (LIMITE_DIARIO + 10);
-      await db.topeCarga.upsert({
-        where: { callerId_dia: { callerId, dia } },
-        create: { callerId, dia, tope, puestoPor: s.usuario },
-        update: { tope, puestoPor: s.usuario },
-      });
+    const s = await exigir("CARGADOR");
+    const admins = await db.usuario.findMany({
+      where: { rol: "ADMIN" },
+      select: { id: true, nombre: true, telegramId: true, telefono: true, ventanaHasta: true, notificar: true },
+    });
+    for (const a of admins) {
+      await enviarAviso({
+        destinatario: a,
+        tipo: "pedido_subida",
+        cuerpo: `📥 ${s.nombre} llegó a su tope de subida de hoy y pide que le habilites más data. Ajustá su tope en Supervisión.`,
+        parametros: [a.nombre, s.nombre],
+      }).catch(() => {});
     }
-    if (pedidoId) {
-      await db.pedidoCarga.update({ where: { id: Number(pedidoId) }, data: { estado: aprobar ? "APROBADO" : "RECHAZADO", resueltoEn: new Date() } });
-    }
-    await auditar(s, aprobar ? "Tope de carga ampliado" : "Pedido de carga rechazado", `caller ${callerId}`);
     return Response.json({ ok: true });
   } catch (e) {
     if (e instanceof Response) return e;
