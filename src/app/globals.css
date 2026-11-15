@@ -122,7 +122,7 @@ td{padding:9px 8px;border-bottom:1px solid #EDF2E9}
 .campana:hover{background:rgba(255,255,255,.22)}
 .campana-badge{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--noquiso);color:#fff;font-size:10px;font-weight:700;line-height:17px;text-align:center;border:2px solid var(--petroleo)}
 .campana-velo{position:fixed;inset:0;z-index:60}
-.campana-panel{position:absolute;top:44px;right:0;width:320px;max-width:86vw;max-height:60vh;overflow-y:auto;background:var(--sup);color:var(--tinta);border:1px solid var(--linea);border-radius:12px;box-shadow:0 16px 40px rgba(20,52,32,.22);z-index:61}
+.campana-panel{position:fixed;top:60px;left:16px;width:340px;max-width:calc(100vw - 32px);max-height:70vh;overflow-y:auto;background:var(--sup);color:var(--tinta);border:1px solid var(--linea);border-radius:12px;box-shadow:0 16px 40px rgba(20,52,32,.22);z-index:61}
 .campana-cab{padding:12px 14px;font-weight:700;border-bottom:1px solid var(--linea);position:sticky;top:0;background:var(--sup)}
 .campana-item{padding:11px 14px;border-bottom:1px solid var(--linea);font-size:13.5px;line-height:1.35}
 .campana-item:last-child{border-bottom:0}
