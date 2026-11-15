@@ -33,7 +33,7 @@ const enMinutos = (m: number) => new Date(Date.now() + m * 60_000);
 /** Aviso inmediato al caller cuando le cargan una ficha nueva. */
 export async function avisarAsignacion(leadId: number) {
   const lead = await db.lead.findUnique({ where: { id: leadId }, include: { asignadoA: true, cargadoPor: true } });
-  if (!lead) return;
+  if (!lead || !lead.asignadoA) return; // en el modelo de pool la data nace sin caller
   const c = await config();
 
   await enviarAviso({
@@ -81,6 +81,7 @@ export async function correrRecordatorios() {
     take: 200,
   });
   for (const l of agendados) {
+    if (!l.asignadoA) continue;
     await enviarAviso({
       destinatario: l.asignadoA,
       tipo: "agendado_ahora",
@@ -103,6 +104,7 @@ export async function correrRecordatorios() {
     take: 200,
   });
   for (const l of reintentos) {
+    if (!l.asignadoA) continue;
     await enviarAviso({
       destinatario: l.asignadoA,
       tipo: "reintento_ahora",
@@ -126,11 +128,12 @@ export async function correrRecordatorios() {
   });
 
   const porCaller = new Map<string, typeof vencidas>();
-  vencidas.forEach((l) => porCaller.set(l.asignadoAId, [...(porCaller.get(l.asignadoAId) ?? []), l]));
+  vencidas.forEach((l) => { if (l.asignadoAId) porCaller.set(l.asignadoAId, [...(porCaller.get(l.asignadoAId) ?? []), l]); });
 
   let enviados = 0;
   for (const [callerId, fichas] of porCaller) {
     const caller = fichas[0].asignadoA;
+    if (!caller) continue;
     const sinLlamar = fichas.filter((f) => f.estado === "PENDIENTE");
     const reintentos = fichas.filter((f) => f.estado !== "PENDIENTE");
     const detalle = fichas.slice(0, 5).map((f) => `- ${f.nombre} ${f.telefono}`).join("\n");
