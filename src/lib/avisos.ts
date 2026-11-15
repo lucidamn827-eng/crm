@@ -21,7 +21,9 @@ export async function enviarAviso(opts: {
   ficha?: { id: number; nombre: string; dni?: string; telefono: string; nota?: string | null; intentos: number };
 }) {
   const { destinatario: d, tipo, cuerpo, parametros, ficha } = opts;
-  if (!d.notificar) return { enviado: false, motivo: "notificaciones apagadas" };
+  // Registro in-app (campanita) SIEMPRE: así aparece en el CRM aunque no haya push ni Telegram.
+  const reg = await db.aviso.create({ data: { usuarioId: d.id, tipo, canal: "app", cuerpo, entregado: false } });
+  if (!d.notificar) return { enviado: false, motivo: "notificaciones apagadas", avisoId: reg.id };
 
   const push = await enviarPush(d.id, {
     titulo: ficha ? `Contacto para llamar: ${ficha.nombre}` : "Lima Limón",
@@ -30,7 +32,7 @@ export async function enviarAviso(opts: {
     tag: `caller-${d.id}`,
   }).catch(() => ({ enviado: false }));
   if (push.enviado) {
-    await db.aviso.create({ data: { usuarioId: d.id, tipo, canal: "push", cuerpo, entregado: true } });
+    await db.aviso.update({ where: { id: reg.id }, data: { canal: "push", entregado: true } });
     return { enviado: true, canal: "push" };
   }
 
@@ -42,12 +44,10 @@ export async function enviarAviso(opts: {
       } else {
         await enviarTexto(d.telegramId, cuerpo);
       }
-      await db.aviso.create({ data: { usuarioId: d.id, tipo, canal: "telegram", cuerpo, entregado: true } });
+      await db.aviso.update({ where: { id: reg.id }, data: { canal: "telegram", entregado: true } });
       return { enviado: true, canal: "telegram" };
     } catch (e: any) {
-      await db.aviso.create({
-        data: { usuarioId: d.id, tipo, canal: "telegram", cuerpo, entregado: false, error: String(e?.message ?? e).slice(0, 300) },
-      });
+      await db.aviso.update({ where: { id: reg.id }, data: { error: String(e?.message ?? e).slice(0, 300) } });
     }
   }
 

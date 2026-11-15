@@ -115,8 +115,23 @@ td{padding:9px 8px;border-bottom:1px solid #EDF2E9}
 .aside-foot .btn.sec{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.3)}
 .aside-foot .btn.sec:hover{background:rgba(255,255,255,.2)}
 
+/* Campanita de notificaciones */
+.aside-acc{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.campana-wrap{position:relative}
+.campana{background:rgba(255,255,255,.1);border:0;color:inherit;width:34px;height:34px;border-radius:9px;display:grid;place-items:center;cursor:pointer;position:relative;transition:background .18s}
+.campana:hover{background:rgba(255,255,255,.22)}
+.campana-badge{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--noquiso);color:#fff;font-size:10px;font-weight:700;line-height:17px;text-align:center;border:2px solid var(--petroleo)}
+.campana-velo{position:fixed;inset:0;z-index:60}
+.campana-panel{position:absolute;top:44px;right:0;width:320px;max-width:86vw;max-height:60vh;overflow-y:auto;background:var(--sup);color:var(--tinta);border:1px solid var(--linea);border-radius:12px;box-shadow:0 16px 40px rgba(20,52,32,.22);z-index:61}
+.campana-cab{padding:12px 14px;font-weight:700;border-bottom:1px solid var(--linea);position:sticky;top:0;background:var(--sup)}
+.campana-item{padding:11px 14px;border-bottom:1px solid var(--linea);font-size:13.5px;line-height:1.35}
+.campana-item:last-child{border-bottom:0}
+.campana-item small{color:var(--tinta2);font-size:11px}
+@media(max-width:900px){.campana-panel{position:fixed;top:58px;right:10px;left:10px;width:auto;max-width:none}}
+
 /* colapsada: solo íconos */
 .layout.min aside{width:66px;flex-basis:66px;padding:14px 8px}
+.layout.min .campana-wrap{display:none}
 .layout.min .marca-txt,.layout.min .navLbl,.layout.min .userBox,.layout.min .aside-foot .btn span{display:none}
 .layout.min .navItem{justify-content:center;gap:0;padding:11px 0}
 .layout.min .aside-top{justify-content:center;padding-right:0;padding-left:0}

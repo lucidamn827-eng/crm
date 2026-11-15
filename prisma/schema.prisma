@@ -56,6 +56,7 @@ model Usuario {
   sesionActual   String?   // id de la única sesión válida: al entrar en otro lado, la anterior muere
   restringidoEn  DateTime? // el sistema le cortó el acceso por estar desconectado en horario laboral; el admin lo reactiva
   topeCargaDiaria Int?     // máximo de data que este spamer puede SUBIR por día (null = sin tope). Lo fija el admin, persiste.
+  avisosVistosEn DateTime? // hasta cuándo marcó como leídas sus notificaciones de la campanita
 }
 
 model Lead {

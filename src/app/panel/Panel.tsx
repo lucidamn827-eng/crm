@@ -53,6 +53,45 @@ function Icono({ k }: { k: string }) {
 }
 /** Quita el emoji inicial de una etiqueta ("📡 En vivo" -> "En vivo"). */
 const limpiaEti = (t: string) => t.replace(/^[^\p{L}\d]+/u, "").trim();
+
+/** Campanita de notificaciones dentro del CRM (PC y móvil). */
+function Campana() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<{ avisos: any[]; sinLeer: number }>({ avisos: [], sinLeer: 0 });
+  const traer = useCallback(() => {
+    fetch("/api/avisos").then((r) => (r.ok ? r.json() : null)).then((d) => d && setData({ avisos: d.avisos ?? [], sinLeer: d.sinLeer ?? 0 })).catch(() => {});
+  }, []);
+  useEffect(() => { traer(); const t = setInterval(traer, 30000); return () => clearInterval(t); }, [traer]);
+  async function abrir() {
+    const nuevo = !open; setOpen(nuevo);
+    if (nuevo && data.sinLeer > 0) {
+      await fetch("/api/avisos", { method: "POST" }).catch(() => {});
+      setData((d) => ({ ...d, sinLeer: 0 }));
+    }
+  }
+  return (
+    <div className="campana-wrap">
+      <button className="campana" onClick={abrir} aria-label="Notificaciones">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 10a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>
+        {data.sinLeer > 0 && <span className="campana-badge">{data.sinLeer > 9 ? "9+" : data.sinLeer}</span>}
+      </button>
+      {open && (
+        <>
+          <div className="campana-velo" onClick={() => setOpen(false)} />
+          <div className="campana-panel">
+            <div className="campana-cab">Notificaciones</div>
+            {data.avisos.length ? data.avisos.map((a) => (
+              <div key={a.id} className="campana-item">
+                <div>{a.cuerpo}</div>
+                <small>{new Date(a.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</small>
+              </div>
+            )) : <div className="campana-item" style={{ color: "var(--tinta2)" }}>No tenés notificaciones.</div>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 /** Fecha corta con hora, como la usan las tablas: 18/08 14:32 */
 const fechaHora = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -214,9 +253,12 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
       <aside className={menuAbierto ? "open" : ""} style={{ background: marca.color }}>
         <div className="aside-top">
           <span className="marca-lat"><Logo size={30} /><span className="marca-txt"><b>Lima Limón</b><small>{marca.titulo}</small></span></span>
-          <button className="sideTg" onClick={() => setColapsada((c) => !c)} aria-label="Colapsar barra" title="Colapsar / expandir">
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{colapsada ? <path d="M9 6l6 6-6 6" /> : <path d="M15 6l-6 6 6 6" />}</svg>
-          </button>
+          <div className="aside-acc">
+            <Campana />
+            <button className="sideTg" onClick={() => setColapsada((c) => !c)} aria-label="Colapsar barra" title="Colapsar / expandir">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{colapsada ? <path d="M9 6l6 6-6 6" /> : <path d="M15 6l-6 6 6 6" />}</svg>
+            </button>
+          </div>
         </div>
         <nav className="nav">
           {pestanas.map(([k, t]) => (
@@ -235,7 +277,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         <header className="barra" style={{ background: marca.color }}>
           <button className="menuBtn" onClick={() => setMenuAbierto(true)} aria-label="Abrir menú">☰</button>
           <Marca size={28} sub={marca.titulo} />
-          <span style={{ marginLeft: "auto", fontSize: 13 }}>{sesion.nombre}</span>
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}><Campana />{sesion.nombre}</span>
         </header>
       <main>
         {saludo && (
