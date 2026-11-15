@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import Avisador from "./Avisador";
-import { Marca } from "../Logo";
+import { Marca, Logo } from "../Logo";
 
 import type { Rol } from "@/lib/auth";
 // Un solo lugar define los roles: src/lib/auth.ts
@@ -28,6 +28,31 @@ const ROL: Record<string, string> = {
   ADMIN: "Administrador", CARGADOR: "Spamer", CALLER: "Caller",
   ENCARGADO: "Encargado de equipo", PROCESADOR: "Procesador de pago",
 };
+
+/** Ícono de cada ítem de la barra lateral. Trazo fino, estilo lineal. */
+function Icono({ k }: { k: string }) {
+  const P: Record<string, React.ReactNode> = {
+    envivo: <><circle cx="12" cy="12" r="2" /><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14" /></>,
+    monitor: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 20h8M12 17v3" /></>,
+    liquidacion: <><rect x="2.5" y="6" width="19" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 9v6M18 9v6" /></>,
+    personal: <><rect x="4" y="9" width="16" height="11" rx="2" /><path d="M8 9V7a4 4 0 0 1 8 0v2" /></>,
+    finanzas: <><path d="M4 19V5M4 19h16" /><path d="M8 15l3-4 3 2 4-6" /></>,
+    todos: <><circle cx="9" cy="8" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M16 6a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-5" /></>,
+    usuarios: <><circle cx="9" cy="8" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M16 6a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-5" /></>,
+    cola: <><path d="M4 6h16M4 12h16M4 18h10" /></>,
+    historial: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    ranking: <><path d="M8 4h8v4a4 4 0 0 1-8 0V4Z" /><path d="M8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M10 14h4M9 20h6M12 14v6" /></>,
+    cielo: <><path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1.3A3.5 3.5 0 0 1 17 18H7Z" /></>,
+    cargar: <><path d="M12 15V4M8 8l4-4 4 4" /><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3" /></>,
+    mias: <><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="M3 13l9 5 9-5M3 18l9 5 9-5" /></>,
+    supervision: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="2.5" /></>,
+    avisos: <><path d="M6 10a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" /><path d="M10 20a2 2 0 0 0 4 0" /></>,
+    meta: <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" /></>,
+  };
+  return <svg className="ic" viewBox="0 0 24 24" aria-hidden="true">{P[k] ?? <circle cx="12" cy="12" r="8" />}</svg>;
+}
+/** Quita el emoji inicial de una etiqueta ("📡 En vivo" -> "En vivo"). */
+const limpiaEti = (t: string) => t.replace(/^[^\p{L}\d]+/u, "").trim();
 /** Fecha corta con hora, como la usan las tablas: 18/08 14:32 */
 const fechaHora = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -74,6 +99,8 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     { titulo: "Supervisión", color: "#1F2937" };
 
   const [vista, setVista] = useState(pestanas[0][0]);
+  const [colapsada, setColapsada] = useState(false);
+  const [menuAbierto, setMenuAbierto] = useState(false);
   const [avisosOk, setAvisosOk] = useState(sesion.rol !== "CALLER");
   const [saludo, setSaludo] = useState<any>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -144,22 +171,70 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
     return () => { clearInterval(t); document.removeEventListener("visibilitychange", alVolver); };
   }, [router]);
 
+  // Números que "suben": al entrar a una vista, animamos los contadores (.metrica b, .numero)
+  // desde 0 hasta su valor. Es puramente visual: el valor final queda idéntico al que pintó React.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const corte = setTimeout(() => {
+      const nodos = Array.from(document.querySelectorAll<HTMLElement>(".metrica b, .numero"));
+      nodos.forEach((el) => {
+        if (el.dataset.cont === "1") return;
+        const orig = (el.textContent || "").trim();
+        const m = orig.match(/^([^\d-]*)(-?\d[\d.]*)(.*)$/u); // $, %, etc. antes/después; sep. de miles con "."
+        if (!m) return;
+        const pre = m[1], post = m[3];
+        const destino = parseFloat(m[2].replace(/\./g, ""));
+        if (!isFinite(destino) || destino === 0 || Math.abs(destino) > 1e9) return;
+        el.dataset.cont = "1";
+        const t0 = performance.now(), dur = 650;
+        const paso = (ahora: number) => {
+          const p = Math.min(1, (ahora - t0) / dur);
+          const e = 1 - Math.pow(1 - p, 3); // ease-out
+          if (p < 1) {
+            el.textContent = pre + Math.round(destino * e).toLocaleString("es-AR") + post;
+            requestAnimationFrame(paso);
+          } else {
+            el.textContent = orig; // snap exacto al valor real
+          }
+        };
+        requestAnimationFrame(paso);
+      });
+    }, 60);
+    return () => clearTimeout(corte);
+  }, [vista]);
+
+  const salir = async () => { await fetch("/api/auth/logout", { method: "POST" }); router.push("/"); };
+
   return (
-    <>
-      <header className="tope" style={{ background: marca.color }}>
-        <div className="tope-in">
-          <Marca size={36} sub={marca.titulo} />
-          <span style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}>
-            {sesion.nombre} <span className="chapa">{ROL[sesion.rol]}</span>
-            <button className="btn chico sec" onClick={async () => { await fetch("/api/auth/logout", { method: "POST" }); router.push("/"); }}>Salir</button>
-          </span>
+    <div className={"layout" + (colapsada ? " min" : "")} data-abierto={menuAbierto}>
+      <div className="backdrop" onClick={() => setMenuAbierto(false)} />
+      <aside className={menuAbierto ? "open" : ""} style={{ background: marca.color }}>
+        <div className="aside-top">
+          <span className="marca-lat"><Logo size={30} /><span className="marca-txt"><b>Lima Limón</b><small>{marca.titulo}</small></span></span>
+          <button className="sideTg" onClick={() => setColapsada((c) => !c)} aria-label="Colapsar barra" title="Colapsar / expandir">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{colapsada ? <path d="M9 6l6 6-6 6" /> : <path d="M15 6l-6 6 6 6" />}</svg>
+          </button>
         </div>
-        <nav className="pestanas">
+        <nav className="nav">
           {pestanas.map(([k, t]) => (
-            <button key={k} className="pestana" data-on={vista === k} onClick={() => setVista(k)}>{t}</button>
+            <button key={k} className={"navItem" + (vista === k ? " on" : "")} title={limpiaEti(t)}
+              onClick={() => { setVista(k); setMenuAbierto(false); }}>
+              <Icono k={k} /><span className="navLbl">{limpiaEti(t)}</span>
+            </button>
           ))}
         </nav>
-      </header>
+        <div className="aside-foot">
+          <div className="userBox"><span className="userName">{sesion.nombre}</span><span className="eti">{ROL[sesion.rol]}</span></div>
+          <button className="btn sec chico" onClick={salir}><span>Salir</span></button>
+        </div>
+      </aside>
+      <div className="col">
+        <header className="barra" style={{ background: marca.color }}>
+          <button className="menuBtn" onClick={() => setMenuAbierto(true)} aria-label="Abrir menú">☰</button>
+          <Marca size={28} sub={marca.titulo} />
+          <span style={{ marginLeft: "auto", fontSize: 13 }}>{sesion.nombre}</span>
+        </header>
       <main>
         {saludo && (
           <div className="velo" onClick={() => setSaludo(null)}>
@@ -225,7 +300,8 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
         {vista === "meta" && <Meta />}
         {vista === "personal" && <Personal />}
       </main>
-    </>
+      </div>
+    </div>
   );
 }
 
