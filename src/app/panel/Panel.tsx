@@ -793,15 +793,25 @@ function Historial({ soyAdmin }: { soyAdmin: boolean }) {
 
 /* ============ ADMIN: monitor en vivo ============ */
 function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuario[]; recargar: () => void }) {
-  const enLlamada = leads.filter((l) => l.enLlamadaDesde);
   useTicker(true);
-  const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
+  // Quién está en llamada se toma del servidor (sirve aunque el contacto sea viejo y no esté en la lista reciente).
+  const [vivo, setVivo] = useState<any>({ callers: [], enLlamada: 0 });
   const [libres, setLibres] = useState<any>({ callers: [], libresAhora: [] });
   useEffect(() => {
-    const traer = () => fetch("/api/asistencia?dias=1").then((r) => (r.ok ? r.json() : null)).then((d) => d && setLibres(d));
-    traer(); const t = setInterval(traer, 60000); return () => clearInterval(t);
+    const traer = () => {
+      fetch("/api/envivo").then((r) => (r.ok ? r.json() : null)).then((d) => d && setVivo(d));
+      fetch("/api/asistencia?dias=1").then((r) => (r.ok ? r.json() : null)).then((d) => d && setLibres(d));
+    };
+    traer(); const t = setInterval(traer, 10000); return () => clearInterval(t);
   }, []);
   const estadoVivo = (id: string) => libres.callers?.find((c: any) => c.id === id);
+  const filas: any[] = vivo.callers ?? [];
+
+  async function liberar(leadId: number) {
+    await fetch(`/api/leads/${leadId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ liberar: true }) });
+    setVivo((v: any) => ({ ...v, callers: (v.callers ?? []).map((x: any) => x.leadId === leadId ? { ...x, enLlamada: false, leadId: null } : x) }));
+    recargar();
+  }
 
   return (
     <>
@@ -812,8 +822,8 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
         </div>
       )}
       <div className="grid4">
-        <div className="metrica"><span className="rotulo">Callers en llamada</span><b>{enLlamada.length}</b></div>
-        <div className="metrica"><span className="rotulo">Callers libres</span><b>{callers.length - enLlamada.length}</b></div>
+        <div className="metrica"><span className="rotulo">Callers en llamada</span><b>{vivo.enLlamada ?? 0}</b></div>
+        <div className="metrica"><span className="rotulo">Callers conectados</span><b>{vivo.conectados ?? 0}</b></div>
         <div className="metrica"><span className="rotulo">Fichas pendientes</span><b>{leads.filter((l) => ["PENDIENTE", "NO_CONTESTO"].includes(l.estado)).length}</b></div>
         <div className="metrica"><span className="rotulo">Aceptaron</span><b>{leads.filter((l) => l.estado === "ACEPTO").length}</b></div>
       </div>
@@ -823,32 +833,29 @@ function Monitor({ leads, usuarios, recargar }: { leads: Lead[]; usuarios: Usuar
         <p className="sub">Se actualiza solo cada 10 segundos.</p>
         <div className="tabla-scroll"><table><tbody>
           <tr><th>Caller</th><th>Estado</th><th>Contacto</th><th>Spamer</th><th>Teléfono</th><th>Tiempo</th><th /></tr>
-          {callers.map((c) => {
-            const l = enLlamada.find((x) => x.asignadoAId === c.id);
+          {filas.map((v) => {
+            const ev = estadoVivo(v.id);
             return (
-              <tr key={c.id}>
-                <td><b>{c.nombre}</b></td>
+              <tr key={v.id}>
+                <td><b>{v.nombre}</b></td>
                 <td>
-                  {(() => {
-                    const ev = estadoVivo(c.id);
-                    if (l) return <span className="eti" style={{ color: "var(--acepto)", borderColor: "var(--acepto)" }}>● En llamada</span>;
-                    if (ev?.callLibre) return <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>⚠ conectado sin llamar</span>;
-                    if (ev?.activoAhora) return <span className="eti" style={{ color: "var(--ambar)", borderColor: "var(--ambar)" }}>entre llamadas</span>;
-                    return <span className="eti" style={{ color: "var(--tinta2)", borderColor: "var(--linea)" }}>desconectado</span>;
-                  })()}
+                  {v.enLlamada
+                    ? <span className="eti" style={{ color: v.colgada ? "var(--ambar)" : "var(--acepto)", borderColor: v.colgada ? "var(--ambar)" : "var(--acepto)" }}>● {v.colgada ? "llamada colgada" : "En llamada"}</span>
+                    : ev?.callLibre
+                      ? <span className="eti" style={{ color: "var(--noquiso)", borderColor: "var(--noquiso)" }}>⚠ conectado sin llamar</span>
+                      : v.conectado
+                        ? <span className="eti" style={{ color: "var(--ambar)", borderColor: "var(--ambar)" }}>entre llamadas</span>
+                        : <span className="eti" style={{ color: "var(--tinta2)", borderColor: "var(--linea)" }}>desconectado</span>}
                 </td>
-                <td>{l ? `${l.nombre} (DNI ${l.dni})` : "—"}</td>
-                <td>{l?.cargadoPor?.nombre ?? "—"}</td>
-                <td className="mono">{l?.telefono ?? "—"}</td>
-                <td className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{l ? mmss(desde(l.enLlamadaDesde)) : "—"}</td>
-                <td>{l && <button className="btn sec chico" onClick={async () => {
-                  await fetch(`/api/leads/${l.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ liberar: true }) });
-                  recargar();
-                }}>Liberar ficha</button>}</td>
+                <td>{v.enLlamada ? `${v.cliente} (DNI ${v.dni})` : "—"}</td>
+                <td>{v.enLlamada ? (v.spamer ?? "—") : "—"}</td>
+                <td className="mono">{v.enLlamada ? v.telefono : "—"}</td>
+                <td className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{v.enLlamada && v.desde ? mmss(desde(v.desde)) : "—"}</td>
+                <td>{v.enLlamada && v.leadId && <button className="btn sec chico" onClick={() => liberar(v.leadId)}>Liberar ficha</button>}</td>
               </tr>
             );
           })}
-          {!callers.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>No hay callers activos.</td></tr>}
+          {!filas.length && <tr><td colSpan={7} style={{ color: "var(--tinta2)" }}>No hay callers activos.</td></tr>}
         </tbody></table></div>
         <div className="tip">“Liberar ficha” devuelve el contacto a la cola si un caller se quedó trabado o cerró la app en medio de una llamada.</div>
       </div>

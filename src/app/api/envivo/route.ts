@@ -20,7 +20,7 @@ export async function GET() {
       db.lead.findMany({
         where: { enLlamadaDesde: { not: null } },
         select: {
-          id: true, nombre: true, enLlamadaDesde: true,
+          id: true, nombre: true, telefono: true, dni: true, enLlamadaDesde: true,
           asignadoA: { select: { id: true, nombre: true } },
           cargadoPor: { select: { nombre: true } },
         },
@@ -40,7 +40,10 @@ export async function GET() {
       return {
         id: c.id, nombre: c.nombre, conectado,
         enLlamada: !!llamada,
+        leadId: llamada?.id ?? null,
         cliente: llamada?.nombre ?? null,
+        dni: llamada?.dni ?? null,
+        telefono: llamada?.telefono ?? null,
         spamer: llamada?.cargadoPor?.nombre ?? null,
         desde: llamada?.enLlamadaDesde ?? null,
         colgada: mins > 30, // +30 min: casi seguro es una ficha que dejó abierta, no una llamada real
