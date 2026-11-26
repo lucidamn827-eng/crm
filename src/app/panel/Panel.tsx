@@ -880,7 +880,9 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
   const [estado, setEstado] = useState<any>(null); // spamer: {hoy,tope,faltan,lleno,porLlegar} · admin: {esAdmin,spamers,pool}
   const [urgente, setUrgente] = useState(false);
   const [callerId, setCallerId] = useState("");
+  const [spamerId, setSpamerId] = useState("");
   const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
+  const spamers = usuarios.filter((u) => u.rol === "CARGADOR" && u.activo);
   const num = (t: string) => t.replace(/\D/g, "");
 
   const traerCarga = useCallback(() => {
@@ -961,6 +963,16 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         <textarea value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} disabled={bloqueado} />
 
         {esAdmin && (
+          <div style={{ marginTop: 10 }}>
+            <label>Data de qué spamer (se le acredita la comisión)</label>
+            <select value={spamerId} onChange={(e) => setSpamerId(e.target.value)}>
+              <option value="">A mi nombre (admin)</option>
+              {spamers.map((sp) => <option key={sp.id} value={sp.id}>{sp.nombre}</option>)}
+            </select>
+          </div>
+        )}
+
+        {esAdmin && (
           <div className="tarjeta" style={{ background: "var(--papel)", marginTop: 10, borderLeft: `4px solid ${urgente ? "var(--noquiso)" : "var(--linea)"}` }}>
             <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
               <input type="checkbox" checked={urgente} onChange={(e) => setUrgente(e.target.checked)} />
@@ -984,7 +996,7 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         {msg?.rechazados?.length > 0 && <div className="error">Rechazados: {msg.rechazados.join(" · ")}</div>}
         {msg?.avisos?.length > 0 && <div className="tip">{msg.avisos.join(" · ")}</div>}
         <button className="btn" style={{ marginTop: 14, background: urgente ? "var(--noquiso)" : undefined }} disabled={faltan || bloqueado || (urgente && !callerId)}
-                onClick={() => { enviar({ ...f, urgente: esAdmin && urgente, callerId: esAdmin && urgente ? callerId : undefined }); setF({ ...vacio, dispositivo: f.dispositivo, usuarioDisp: f.usuarioDisp }); }}>
+                onClick={() => { enviar({ ...f, urgente: esAdmin && urgente, callerId: esAdmin && urgente ? callerId : undefined, spamerId: esAdmin ? (spamerId || undefined) : undefined }); setF({ ...vacio, dispositivo: f.dispositivo, usuarioDisp: f.usuarioDisp }); }}>
           {bloqueado ? "Llegaste a tu tope de hoy" : faltan ? "Completá nombre, DNI, teléfono y dispositivo" : (urgente ? (callerId ? "🚨 Asignar llamada urgente" : "Elegí el caller") : "Subir al pool")}
         </button>
       </div>

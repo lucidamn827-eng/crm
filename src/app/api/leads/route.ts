@@ -79,6 +79,15 @@ export async function POST(req: Request) {
       if (!caller) return Response.json({ error: "Elegí un caller válido para la llamada urgente." }, { status: 400 });
     }
 
+    // El admin puede atribuir la data a un spamer (la data urgente se la pasan los spamers).
+    // Si no elige, la data queda a su nombre. Los spamers siempre cargan a su propio nombre.
+    let cargadoPorId = s.id;
+    if (s.rol === "ADMIN" && body.spamerId) {
+      const sp = await db.usuario.findFirst({ where: { id: String(body.spamerId), rol: "CARGADOR" }, select: { id: true } });
+      if (!sp) return Response.json({ error: "Elegí un spamer válido." }, { status: 400 });
+      cargadoPorId = sp.id;
+    }
+
     // Tope de subida del spamer (los ADMIN no tienen tope).
     let subidasHoy = s.rol === "CARGADOR" ? await dataSubidaHoy(s.id) : 0;
     const tope = s.rol === "CARGADOR" ? await topeSubidaDe(s.id) : null;
@@ -107,7 +116,7 @@ export async function POST(req: Request) {
         data: {
           nombre, dni, telefono, nota: f.nota || null,
           dispositivo, usuarioDisp: usuarioDisp || null,
-          cargadoPorId: s.id,
+          cargadoPorId,
           // URGENTE: se reserva directo al caller elegido. Si no, va al pool (sin caller).
           asignadoAId: urgenteParaId,
           reservadoEn: urgenteParaId ? new Date() : null,
