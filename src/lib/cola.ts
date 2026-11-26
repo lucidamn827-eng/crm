@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getPrioridadCola } from "@/lib/carga";
 
 export const MAX_INTENTOS = 3;        // un "no contestó" se intenta hasta 3 veces
 export const LAPSO_REINTENTO_MIN = 120; // 2 h de descanso antes de volver al pool
@@ -50,9 +51,8 @@ export async function reservarSiguiente(callerId: string): Promise<number | null
   });
   if (yaTiene) return yaTiene.id;
 
-  // 1) PRIORIDAD: un "no contestó" que ya cumplió sus 2 h (< 3 intentos), AL AZAR.
-  //    Se llama sí o sí antes que la data nueva. Se repasa hasta 2 días (hoy o ayer, hora Perú).
-  const reintento = await reservarUna(callerId,
+  // Un "no contestó" que ya cumplió sus 2 h (< 3 intentos), AL AZAR. Repaso hasta 2 días (hoy o ayer).
+  const tomarReposada = () => reservarUna(callerId,
     `SELECT id FROM "Lead"
       WHERE estado = 'NO_CONTESTO' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
         AND intentos < ${MAX_INTENTOS}
@@ -60,15 +60,18 @@ export async function reservarSiguiente(callerId: string): Promise<number | null
         AND "reactivaEn" >= ((date_trunc('day', now() AT TIME ZONE 'America/Lima') - interval '1 day') AT TIME ZONE 'America/Lima')
       ORDER BY random()
       LIMIT 1 FOR UPDATE SKIP LOCKED`);
-  if (reintento) return reintento;
-
-  // 2) Data NUEVA, la más antigua primero (saltando las pospuestas con "Aún no").
-  return reservarUna(callerId,
+  // Data NUEVA, la más antigua primero (saltando las pospuestas con "Aún no").
+  const tomarNueva = () => reservarUna(callerId,
     `SELECT id FROM "Lead"
       WHERE estado = 'PENDIENTE' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
         AND ("reactivaEn" IS NULL OR "reactivaEn" <= now())
       ORDER BY "creadoEn" ASC
       LIMIT 1 FOR UPDATE SKIP LOCKED`);
+
+  // El admin decide qué se prioriza; si lo priorizado se agotó, cae en lo otro.
+  const prioridad = await getPrioridadCola();
+  const [primero, segundo] = prioridad === "nueva" ? [tomarNueva, tomarReposada] : [tomarReposada, tomarNueva];
+  return (await primero()) ?? (await segundo());
 }
 
 /** UPDATE ... WHERE id = (subconsulta con FOR UPDATE SKIP LOCKED): reserva sin choques. */

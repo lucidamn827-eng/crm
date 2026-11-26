@@ -1375,6 +1375,10 @@ function Supervision() {
       body: JSON.stringify({ id: sp.id, topeCargaDiaria: resp.trim() === "" ? null : Number(resp) }) });
     traerCarga();
   }
+  async function cambiarPrioridad(v: "nueva" | "reposada") {
+    await fetch("/api/carga", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prioridad: v }) });
+    traerCarga();
+  }
 
   useEffect(() => {
     fetch(`/api/supervision?dias=${dias}`).then((r) => (r.ok ? r.json() : null)).then(setD);
@@ -1394,10 +1398,22 @@ function Supervision() {
         <div className="tarjeta">
           <h2>Data en el pool (sin cerrar)</h2>
           <div className="grid4">
-            <div className="metrica"><span className="rotulo">Sin llamar</span><b>{carga.pool.sinLlamar}</b></div>
-            <div className="metrica"><span className="rotulo">No contestó</span><b>{carga.pool.noContesto}</b></div>
-            <div className="metrica"><span className="rotulo">No quiso</span><b>{carga.pool.noQuiso}</b></div>
-            <div className="metrica"><span className="rotulo">Total para llamar</span><b>{carga.pool.total}</b></div>
+            <div className="metrica"><span className="rotulo">Data nueva (sin llamar)</span><b>{carga.pool.sinLlamar}</b></div>
+            <div className="metrica"><span className="rotulo">Repaso · 1 intento</span><b>{carga.pool.repaso1 ?? 0}</b></div>
+            <div className="metrica"><span className="rotulo">Repaso · 2 intentos</span><b>{carga.pool.repaso2 ?? 0}</b></div>
+            <div className="metrica"><span className="rotulo">Repaso total (hoy + ayer)</span><b>{carga.pool.repasoTotal ?? 0}</b></div>
+          </div>
+          <p className="sub" style={{ marginTop: 8 }}>
+            "Repaso" = no contestó dentro de los últimos 2 días (hoy + ayer), que vuelven a salir. Guardados fuera de rotación: <b>{carga.pool.fueraRepaso ?? 0}</b> · No quiso: <b>{carga.pool.noQuiso}</b>.
+          </p>
+
+          <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--linea)" }}>
+            <b>¿Qué llaman primero los callers?</b>
+            <p className="sub" style={{ marginTop: 2 }}>Cuando subas data nueva, podés priorizarla; o priorizar el repaso. Lo otro se llama cuando se agota lo priorizado.</p>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              <button className={`btn ${carga.prioridad === "nueva" ? "" : "sec"}`} onClick={() => cambiarPrioridad("nueva")}>Priorizar data nueva</button>
+              <button className={`btn ${carga.prioridad === "reposada" ? "" : "sec"}`} onClick={() => cambiarPrioridad("reposada")}>Priorizar repaso (volver a llamar)</button>
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { exigir } from "@/lib/auth";
-import { resumenSubida, resumenPool, dataSubidaHoy, topeSubidaDe } from "@/lib/carga";
+import { resumenSubida, resumenPool, dataSubidaHoy, topeSubidaDe, getPrioridadCola, setPrioridadCola } from "@/lib/carga";
 import { enviarAviso } from "@/lib/avisos";
 
 /** Estado de subida de hoy. El spamer ve lo suyo; el admin ve a todos + el pool. */
@@ -8,8 +8,8 @@ export async function GET() {
   try {
     const s = await exigir("ADMIN", "CARGADOR");
     if (s.rol === "ADMIN") {
-      const [spamers, pool] = await Promise.all([resumenSubida(), resumenPool()]);
-      return Response.json({ esAdmin: true, spamers, pool });
+      const [spamers, pool, prioridad] = await Promise.all([resumenSubida(), resumenPool(), getPrioridadCola()]);
+      return Response.json({ esAdmin: true, spamers, pool, prioridad });
     }
     // Spamer: su propio estado de subida.
     const [hoy, tope] = await Promise.all([dataSubidaHoy(s.id), topeSubidaDe(s.id)]);
@@ -20,6 +20,20 @@ export async function GET() {
       lleno: tope !== null && hoy >= tope,
       porLlegar: tope !== null && faltan !== null && faltan > 0 && faltan <= 5, // aviso 5 antes
     });
+  } catch (e) {
+    if (e instanceof Response) return e;
+    return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });
+  }
+}
+
+/** El admin cambia qué prioriza la cola: data nueva o data reposada (volver a llamar). */
+export async function PATCH(req: Request) {
+  try {
+    await exigir("ADMIN");
+    const { prioridad } = await req.json();
+    if (prioridad !== "nueva" && prioridad !== "reposada") return Response.json({ error: "Prioridad inválida." }, { status: 400 });
+    await setPrioridadCola(prioridad);
+    return Response.json({ ok: true, prioridad });
   } catch (e) {
     if (e instanceof Response) return e;
     return Response.json({ error: String((e as any)?.message ?? e) }, { status: 500 });

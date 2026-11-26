@@ -53,10 +53,26 @@ export async function resumenSubida(dia = diaHoy()) {
 /** Conteos del POOL de data (solo lo que todavía no cerró): para el panel del admin. */
 export async function resumenPool() {
   const base = { archivadoEn: null } as any;
-  const [sinLlamar, noContesto, noQuiso] = await Promise.all([
-    db.lead.count({ where: { ...base, estado: "PENDIENTE" } }),
+  // Ventana de repaso: hoy + ayer (máximo 1 día anterior).
+  const ventana = new Date(rangoDelDia().desde.getTime() - 86400000);
+  const repaso = { ...base, estado: "NO_CONTESTO", asignadoAId: null, reactivaEn: { gte: ventana } } as any;
+  const [sinLlamar, noContesto, noQuiso, repaso1, repaso2, fueraRepaso] = await Promise.all([
+    db.lead.count({ where: { ...base, estado: "PENDIENTE", asignadoAId: null } }),
     db.lead.count({ where: { ...base, estado: "NO_CONTESTO" } }),
     db.lead.count({ where: { ...base, estado: "NO_QUISO" } }),
+    db.lead.count({ where: { ...repaso, intentos: 1 } }),
+    db.lead.count({ where: { ...repaso, intentos: 2 } }),
+    // "No contestó" guardados fuera de rotación (3 intentos o más de 1 día): se recuperan con el buscador.
+    db.lead.count({ where: { ...base, estado: "NO_CONTESTO", OR: [{ intentos: { gte: 3 } }, { reactivaEn: null }, { reactivaEn: { lt: ventana } }] } }),
   ]);
-  return { sinLlamar, noContesto, noQuiso, total: sinLlamar + noContesto };
+  return { sinLlamar, noContesto, noQuiso, total: sinLlamar + noContesto, repaso1, repaso2, repasoTotal: repaso1 + repaso2, fueraRepaso };
+}
+
+/** Prioridad de la cola: "reposada" (repaso primero) o "nueva" (data nueva primero). */
+export async function getPrioridadCola(): Promise<"reposada" | "nueva"> {
+  const c = await db.config.findUnique({ where: { clave: "prioridad_cola" } });
+  return c?.valor === "nueva" ? "nueva" : "reposada";
+}
+export async function setPrioridadCola(v: "reposada" | "nueva") {
+  await db.config.upsert({ where: { clave: "prioridad_cola" }, update: { valor: v }, create: { clave: "prioridad_cola", valor: v } });
 }
