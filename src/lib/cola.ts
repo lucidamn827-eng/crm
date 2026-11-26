@@ -13,11 +13,12 @@ function inicioDiaLima(): Date {
 
 /** Cuántas fichas hay disponibles en el pool para llamar ahora. */
 export async function contarDisponibles(ahora = new Date()): Promise<number> {
-  const hoy = inicioDiaLima();
+  // Ventana de repaso: hoy + ayer (2 días máximo).
+  const ventana = new Date(inicioDiaLima().getTime() - 86400000);
   const [nuevas, reintentos] = await Promise.all([
     db.lead.count({ where: { estado: "PENDIENTE", asignadoAId: null, archivadoEn: null, OR: [{ reactivaEn: null }, { reactivaEn: { lte: ahora } }] } }),
-    // "No contestó" SOLO se repasa el mismo día: su reactivaEn tiene que caer dentro de hoy.
-    db.lead.count({ where: { estado: "NO_CONTESTO", asignadoAId: null, archivadoEn: null, intentos: { lt: MAX_INTENTOS }, reactivaEn: { gte: hoy, lte: ahora } } }),
+    // "No contestó" se repasa hasta 2 días: su último intento (reactivaEn) tiene que caer en hoy o ayer.
+    db.lead.count({ where: { estado: "NO_CONTESTO", asignadoAId: null, archivadoEn: null, intentos: { lt: MAX_INTENTOS }, reactivaEn: { gte: ventana, lte: ahora } } }),
   ]);
   return nuevas + reintentos;
 }
@@ -49,14 +50,14 @@ export async function reservarSiguiente(callerId: string): Promise<number | null
   });
   if (yaTiene) return yaTiene.id;
 
-  // 1) PRIORIDAD: un "no contestó" DE HOY que ya cumplió sus 2 h (< 3 intentos), AL AZAR.
-  //    Se llama sí o sí antes que la data nueva. Solo del mismo día (hora Perú).
+  // 1) PRIORIDAD: un "no contestó" que ya cumplió sus 2 h (< 3 intentos), AL AZAR.
+  //    Se llama sí o sí antes que la data nueva. Se repasa hasta 2 días (hoy o ayer, hora Perú).
   const reintento = await reservarUna(callerId,
     `SELECT id FROM "Lead"
       WHERE estado = 'NO_CONTESTO' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
         AND intentos < ${MAX_INTENTOS}
         AND "reactivaEn" IS NOT NULL AND "reactivaEn" <= now()
-        AND "reactivaEn" >= (date_trunc('day', now() AT TIME ZONE 'America/Lima') AT TIME ZONE 'America/Lima')
+        AND "reactivaEn" >= ((date_trunc('day', now() AT TIME ZONE 'America/Lima') - interval '1 day') AT TIME ZONE 'America/Lima')
       ORDER BY random()
       LIMIT 1 FOR UPDATE SKIP LOCKED`);
   if (reintento) return reintento;
