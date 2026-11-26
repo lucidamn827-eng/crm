@@ -2090,7 +2090,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
               : d.ventas;
             return (
           <div className="tabla-scroll"><table><tbody>
-            <tr><th>Fecha</th><th>Cliente</th><th>Caller</th><th>Spamer</th><th>Procesador</th><th>Monto</th><th>Ref.</th><th>Estado</th><th /></tr>
+            <tr><th>Fecha</th><th>Cliente</th><th>Caller</th><th>Spamer</th><th>Procesador</th><th>Monto</th><th>Comisión</th><th>Ref.</th><th>Estado</th><th /></tr>
             {ventasFiltradas.map((v: any) => (
               <tr key={v.id} style={v.anulada ? { opacity: .55 } : undefined}>
                 <td className="mono">{new Date(v.creadoEn).toLocaleString("es", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
@@ -2098,7 +2098,14 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
                 <td>{v.caller}</td>
                 <td>{v.spamer}</td>
                 <td>{v.procesador}</td>
-                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto)}{v.cuentaEmpresa && <><br /><span className="eti" style={{ color: "var(--volver)", borderColor: "var(--volver)" }}>empresa 5%</span></>}</td>
+                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto)}</td>
+                <td>
+                  <button className="btn chico sec" title="Tocá para cambiar la comisión de esta venta"
+                          style={{ color: v.cuentaEmpresa ? "var(--volver)" : undefined, borderColor: v.cuentaEmpresa ? "var(--volver)" : undefined }}
+                          onClick={() => revisar(v.id, { cuentaEmpresa: !v.cuentaEmpresa })}>
+                    {v.cuentaEmpresa ? "5% empresa" : "10% normal"}
+                  </button>
+                </td>
                 <td className="mono">{v.referencia ?? "—"}</td>
                 <td>
                   {v.anulada
@@ -2120,7 +2127,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
                 </td>
               </tr>
             ))}
-            {!ventasFiltradas.length && <tr><td colSpan={9} style={{ color: "var(--tinta2)" }}>{d.ventas.length ? "Ninguna venta coincide con la búsqueda." : "Sin ventas esta semana."}</td></tr>}
+            {!ventasFiltradas.length && <tr><td colSpan={10} style={{ color: "var(--tinta2)" }}>{d.ventas.length ? "Ninguna venta coincide con la búsqueda." : "Sin ventas esta semana."}</td></tr>}
           </tbody></table></div>
             );
           })()}
