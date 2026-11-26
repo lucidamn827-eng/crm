@@ -107,6 +107,7 @@ model Llamada {
   procesador   Usuario? @relation("procesador", fields: [procesadorId], references: [id])
   procesadorId String?
   referencia   String?  // nº de operación, voucher o comprobante
+  cuentaEmpresa Boolean @default(false) // pago a cuenta de la empresa: comisión 5% para todos (en vez de 10%)
   validada     Boolean  @default(false) // el admin confirmó que el dinero entró
   anulada      Boolean  @default(false) // venta caída: no cuenta para comisión ni ranking
   revisadoPor  String?

@@ -5,11 +5,19 @@ export const LAPSO_REINTENTO_MIN = 120; // 2 h de descanso antes de volver al po
 export const POSPONER_MIN = 5;        // al dar "Aún no", el contacto no reaparece por este rato
 const RESERVA_VENCE_MIN = 20;         // una reserva abandonada (caller desconectado) vuelve al pool tras esto
 
+/** Inicio del día de hoy en hora de Perú (UTC-5), como instante. */
+function inicioDiaLima(): Date {
+  const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return new Date(`${ymd}T00:00:00-05:00`);
+}
+
 /** Cuántas fichas hay disponibles en el pool para llamar ahora. */
 export async function contarDisponibles(ahora = new Date()): Promise<number> {
+  const hoy = inicioDiaLima();
   const [nuevas, reintentos] = await Promise.all([
     db.lead.count({ where: { estado: "PENDIENTE", asignadoAId: null, archivadoEn: null, OR: [{ reactivaEn: null }, { reactivaEn: { lte: ahora } }] } }),
-    db.lead.count({ where: { estado: "NO_CONTESTO", asignadoAId: null, archivadoEn: null, intentos: { lt: MAX_INTENTOS }, reactivaEn: { lte: ahora } } }),
+    // "No contestó" SOLO se repasa el mismo día: su reactivaEn tiene que caer dentro de hoy.
+    db.lead.count({ where: { estado: "NO_CONTESTO", asignadoAId: null, archivadoEn: null, intentos: { lt: MAX_INTENTOS }, reactivaEn: { gte: hoy, lte: ahora } } }),
   ]);
   return nuevas + reintentos;
 }
@@ -29,7 +37,8 @@ export async function estadoColaCaller(callerId: string) {
 
 /**
  * Reserva atómica del siguiente contacto para un caller.
- * Prioridad: data nueva, la más antigua primero; si no hay, un "no contestó" vencido al azar.
+ * PRIORIDAD: primero los "no contestó" de hoy que ya cumplieron sus 2 h (sí o sí, antes
+ * que la data nueva); si no hay, la data nueva más antigua.
  * Devuelve el id reservado, o null si no hay nada.
  */
 export async function reservarSiguiente(callerId: string): Promise<number | null> {
@@ -40,21 +49,24 @@ export async function reservarSiguiente(callerId: string): Promise<number | null
   });
   if (yaTiene) return yaTiene.id;
 
-  // 1) Data NUEVA, la más antigua primero (saltando las pospuestas con "Aún no").
-  const nueva = await reservarUna(callerId,
+  // 1) PRIORIDAD: un "no contestó" DE HOY que ya cumplió sus 2 h (< 3 intentos), AL AZAR.
+  //    Se llama sí o sí antes que la data nueva. Solo del mismo día (hora Perú).
+  const reintento = await reservarUna(callerId,
+    `SELECT id FROM "Lead"
+      WHERE estado = 'NO_CONTESTO' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
+        AND intentos < ${MAX_INTENTOS}
+        AND "reactivaEn" IS NOT NULL AND "reactivaEn" <= now()
+        AND "reactivaEn" >= (date_trunc('day', now() AT TIME ZONE 'America/Lima') AT TIME ZONE 'America/Lima')
+      ORDER BY random()
+      LIMIT 1 FOR UPDATE SKIP LOCKED`);
+  if (reintento) return reintento;
+
+  // 2) Data NUEVA, la más antigua primero (saltando las pospuestas con "Aún no").
+  return reservarUna(callerId,
     `SELECT id FROM "Lead"
       WHERE estado = 'PENDIENTE' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
         AND ("reactivaEn" IS NULL OR "reactivaEn" <= now())
       ORDER BY "creadoEn" ASC
-      LIMIT 1 FOR UPDATE SKIP LOCKED`);
-  if (nueva) return nueva;
-
-  // 2) Un "no contestó" vencido (pasó el lapso, < 3 intentos), AL AZAR.
-  return reservarUna(callerId,
-    `SELECT id FROM "Lead"
-      WHERE estado = 'NO_CONTESTO' AND "asignadoAId" IS NULL AND "archivadoEn" IS NULL
-        AND intentos < ${MAX_INTENTOS} AND "reactivaEn" IS NOT NULL AND "reactivaEn" <= now()
-      ORDER BY random()
       LIMIT 1 FOR UPDATE SKIP LOCKED`);
 }
 

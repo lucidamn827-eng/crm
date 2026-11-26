@@ -352,7 +352,7 @@ export default function Panel({ sesion }: { sesion: Sesion }) {
 /* ============ CALLER: cola con confirmación antes de llamar ============ */
 function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: any; recargar: () => void; procesadores: Usuario[] }) {
   const [nota, setNota] = useState(""), [msg, setMsg] = useState("");
-  const [cobro, setCobro] = useState<{ paso: "saco" | "monto" | "sinplata"; monto: string; referencia: string; procesadorId: string } | null>(null);
+  const [cobro, setCobro] = useState<{ paso: "saco" | "monto" | "sinplata"; monto: string; referencia: string; procesadorId: string; cuentaEmpresa: boolean } | null>(null);
   const [festejo, setFestejo] = useState<any>(null);
   const [noQuisoMenu, setNoQuisoMenu] = useState(false);
   const [motivoOtro, setMotivoOtro] = useState("");
@@ -470,10 +470,16 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
                        style={{ fontSize: 26, fontWeight: 700, textAlign: "center" }}
                        placeholder="0.00" value={cobro.monto}
                        onChange={(e) => setCobro({ ...cobro, monto: e.target.value.replace(/[^\d.]/g, "") })} />
+                <label style={{ marginTop: 10 }}>¿Cómo pagó?</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" className={`btn ${cobro.cuentaEmpresa ? "sec" : ""}`} style={{ flex: 1 }} onClick={() => setCobro({ ...cobro, cuentaEmpresa: false })}>Pago normal</button>
+                  <button type="button" className={`btn ${cobro.cuentaEmpresa ? "" : "sec"}`} style={{ flex: 1 }} onClick={() => setCobro({ ...cobro, cuentaEmpresa: true })}>A cuenta de la empresa</button>
+                </div>
+                {cobro.cuentaEmpresa && <p className="sub" style={{ marginTop: 4 }}>Pago a cuenta de la empresa: la comisión es del 5% para todos.</p>}
                 {!!Number(cobro.monto) && (
                   <p className="sub" style={{ textAlign: "center", marginTop: 6 }}>
                     Tu comisión: <b className="mono" style={{ color: "var(--acepto)", fontSize: 17 }}>
-                      S/ {(Number(cobro.monto) * 0.1).toFixed(2)}
+                      S/ {(Number(cobro.monto) * (cobro.cuentaEmpresa ? 0.05 : 0.1)).toFixed(2)}
                     </b>
                   </p>
                 )}
@@ -495,6 +501,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
                           disabled={!(Number(cobro.monto) > 0) || (!!procesadores.length && !cobro.procesadorId)}
                           onClick={() => registrar(enCurso.id, "ACEPTO", {
                             monto: Number(cobro.monto), referencia: cobro.referencia, procesadorId: cobro.procesadorId || null,
+                            cuentaEmpresa: cobro.cuentaEmpresa,
                           })}>
                     Confirmar venta
                   </button>
@@ -597,7 +604,7 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
             </div>
           ) : (
             <div className="resultados">
-              <button className="res a" onClick={() => setCobro({ paso: "saco", monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "" })}>Aceptó</button>
+              <button className="res a" onClick={() => setCobro({ paso: "saco", monto: "", referencia: "", procesadorId: procesadores.length === 1 ? procesadores[0].id : "", cuentaEmpresa: false })}>Aceptó</button>
               <button className="res n" onClick={() => registrar(enCurso.id, "NO_CONTESTO")}>No contestó</button>
               <button className="res x" onClick={() => setNoQuisoMenu(true)}>No quiso</button>
             </div>
@@ -617,12 +624,14 @@ function Cola({ leads, cola, recargar, procesadores }: { leads: Lead[]; cola: an
             </>
           ) : (
             <>
-              <div style={{ fontSize: 34, lineHeight: 1 }}>📞</div>
-              <b style={{ fontSize: 18 }}>Tenés un nuevo cliente para llamar</b>
+              <div style={{ fontSize: 34, lineHeight: 1 }}>{(reservada as any).urgente ? "🚨" : "📞"}</div>
+              {(reservada as any).urgente
+                ? <b style={{ fontSize: 18, color: "var(--noquiso)" }}>Tenés una llamada urgente asignada por tu administrador</b>
+                : <b style={{ fontSize: 18 }}>Tenés un nuevo cliente para llamar</b>}
               <p className="sub" style={{ marginTop: 4 }}>Data cargada el {fechaHora(reservada.creadoEn)}. Al dar “Llamar ahora” se destapan el número y el DNI, y arranca el cronómetro.</p>
               <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                 <button className="btn" onClick={() => tomar(reservada.id, true)}>Llamar ahora</button>
-                <button className="btn sec" onClick={() => setPosponiendo(true)}>Aún no</button>
+                {!(reservada as any).urgente && <button className="btn sec" onClick={() => setPosponiendo(true)}>Aún no</button>}
               </div>
             </>
           )}
@@ -869,6 +878,9 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
   const [f, setF] = useState(vacio);
   const [msg, setMsg] = useState<any>(null);
   const [estado, setEstado] = useState<any>(null); // spamer: {hoy,tope,faltan,lleno,porLlegar} · admin: {esAdmin,spamers,pool}
+  const [urgente, setUrgente] = useState(false);
+  const [callerId, setCallerId] = useState("");
+  const callers = usuarios.filter((u) => u.rol === "CALLER" && u.activo);
   const num = (t: string) => t.replace(/\D/g, "");
 
   const traerCarga = useCallback(() => {
@@ -947,14 +959,33 @@ function Cargar({ usuarios, recargar }: { usuarios: Usuario[]; recargar: () => v
         </div>
         <label>Nota</label>
         <textarea value={f.nota} onChange={(e) => setF({ ...f, nota: e.target.value })} disabled={bloqueado} />
+
+        {esAdmin && (
+          <div className="tarjeta" style={{ background: "var(--papel)", marginTop: 10, borderLeft: `4px solid ${urgente ? "var(--noquiso)" : "var(--linea)"}` }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+              <input type="checkbox" checked={urgente} onChange={(e) => setUrgente(e.target.checked)} />
+              <b>🚨 Llamada urgente (asignar a un caller)</b>
+            </label>
+            {urgente && (
+              <div style={{ marginTop: 8 }}>
+                <p className="sub">No va al pool: se le reserva a este caller y le salta apenas quede libre.</p>
+                <select value={callerId} onChange={(e) => setCallerId(e.target.value)}>
+                  <option value="">Elegí el caller…</option>
+                  {callers.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
+
         {msg?.error && <div className="error">{msg.error}</div>}
         {msg?.ok && <div className="ok">{msg.ok}</div>}
-        {msg?.creados > 0 && <div className="ok">{msg.creados} contacto(s) cargados al pool.{msg.tope !== null && msg.faltan !== null ? ` Te quedan ${msg.faltan} de tu tope.` : ""}</div>}
+        {msg?.creados > 0 && <div className="ok">{msg.creados} contacto(s) cargados {urgente ? "como urgentes." : "al pool."}{msg.tope !== null && msg.faltan !== null ? ` Te quedan ${msg.faltan} de tu tope.` : ""}</div>}
         {msg?.rechazados?.length > 0 && <div className="error">Rechazados: {msg.rechazados.join(" · ")}</div>}
         {msg?.avisos?.length > 0 && <div className="tip">{msg.avisos.join(" · ")}</div>}
-        <button className="btn" style={{ marginTop: 14 }} disabled={faltan || bloqueado}
-                onClick={() => { enviar(f); setF({ ...vacio, dispositivo: f.dispositivo, usuarioDisp: f.usuarioDisp }); }}>
-          {bloqueado ? "Llegaste a tu tope de hoy" : faltan ? "Completá nombre, DNI, teléfono y dispositivo" : "Subir al pool"}
+        <button className="btn" style={{ marginTop: 14, background: urgente ? "var(--noquiso)" : undefined }} disabled={faltan || bloqueado || (urgente && !callerId)}
+                onClick={() => { enviar({ ...f, urgente: esAdmin && urgente, callerId: esAdmin && urgente ? callerId : undefined }); setF({ ...vacio, dispositivo: f.dispositivo, usuarioDisp: f.usuarioDisp }); }}>
+          {bloqueado ? "Llegaste a tu tope de hoy" : faltan ? "Completá nombre, DNI, teléfono y dispositivo" : (urgente ? (callerId ? "🚨 Asignar llamada urgente" : "Elegí el caller") : "Subir al pool")}
         </button>
       </div>
     </>
@@ -2055,7 +2086,7 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
                 <td>{v.caller}</td>
                 <td>{v.spamer}</td>
                 <td>{v.procesador}</td>
-                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto)}</td>
+                <td className="mono" style={{ fontWeight: 700 }}>{soles(v.monto)}{v.cuentaEmpresa && <><br /><span className="eti" style={{ color: "var(--volver)", borderColor: "var(--volver)" }}>empresa 5%</span></>}</td>
                 <td className="mono">{v.referencia ?? "—"}</td>
                 <td>
                   {v.anulada

@@ -7,7 +7,12 @@ const BASE = 0.10;        // comisión normal del caller
 const PRIMERO = 0.12;     // caller que ganó el ranking la semana pasada
 const PROCESADOR = 0.10;  // quien procesa el pago
 const ENCARGADO = 0.10;   // jefe, sobre las ventas de su gente
+const EMPRESA = 0.05;     // pago a cuenta de la empresa: 5% para todos
 const POR_VALIDADA = 10;  // soles fijos por cada venta validada, para caller y spamer
+
+// Comisión de un conjunto de ventas: 5% si fue a cuenta de la empresa, si no la tasa normal.
+const comisionar = (ventas: any[], tasaNormal: number) =>
+  ventas.reduce((n, v) => n + (v.monto ?? 0) * (v.cuentaEmpresa ? EMPRESA : tasaNormal), 0);
 
 /**
  * Liquidación semanal. Cada rol cobra distinto:
@@ -57,6 +62,7 @@ export async function GET(req: Request) {
       id: v.id, monto: v.monto ?? 0, referencia: v.referencia, validada: v.validada, anulada: v.anulada,
       creadoEn: v.creadoEn, caller: v.caller?.nombre, procesador: v.procesador?.nombre ?? "—",
       cliente: v.lead?.nombre, dni: v.lead?.dni, telefono: v.lead?.telefono, spamer: v.lead?.cargadoPor?.nombre ?? "—",
+      cuentaEmpresa: !!v.cuentaEmpresa,
     });
 
     /** Arma la liquidación de una persona según su rol. */
@@ -73,9 +79,9 @@ export async function GET(req: Request) {
         const incentivo = vendidoDomingo * INCENTIVO_DOMINGO;
         return {
           id: u.id, nombre: u.nombre, rol: u.rol, concepto: "Comisión + S/ 10 por venta validada",
-          operaciones: mias.length, base: vendido, tasa, comision: vendido * tasa, bono, incentivo,
+          operaciones: mias.length, base: vendido, tasa, comision: comisionar(mias, tasa), bono, incentivo,
           validadas, fijo, porValidada: POR_VALIDADA,
-          total: vendido * tasa + bono + fijo + incentivo, siguiente: siguienteMeta("CALLER", mias.length),
+          total: comisionar(mias, tasa) + bono + fijo + incentivo, siguiente: siguienteMeta("CALLER", mias.length),
           pendientes: mias.filter((v) => !v.validada).length,
           anuladas: ventas.filter((v) => v.callerId === u.id && v.anulada).length,
           detalle: ventas.filter((v) => v.callerId === u.id).map(fila),
@@ -86,9 +92,9 @@ export async function GET(req: Request) {
         const base = mias.reduce((n, v) => n + (v.monto ?? 0), 0);
         return {
           id: u.id, nombre: u.nombre, rol: u.rol, concepto: "10% de las ventas que procesaste",
-          operaciones: mias.length, base, tasa: PROCESADOR, comision: base * PROCESADOR, bono: 0,
+          operaciones: mias.length, base, tasa: PROCESADOR, comision: comisionar(mias, PROCESADOR), bono: 0,
           validadas: mias.filter((v) => v.validada).length, fijo: 0,
-          total: base * PROCESADOR, siguiente: null,
+          total: comisionar(mias, PROCESADOR), siguiente: null,
           pendientes: mias.filter((v) => !v.validada).length, anuladas: 0,
           detalle: ventas.filter((v) => v.procesadorId === u.id).map(fila),
         };
@@ -101,9 +107,9 @@ export async function GET(req: Request) {
         const base = mias.reduce((n, v) => n + (v.monto ?? 0), 0);
         return {
           id: u.id, nombre: u.nombre, rol: u.rol, concepto: "10% de las ventas de tu equipo",
-          operaciones: mias.length, base, tasa: ENCARGADO, comision: base * ENCARGADO, bono: 0,
+          operaciones: mias.length, base, tasa: ENCARGADO, comision: comisionar(mias, ENCARGADO), bono: 0,
           validadas: mias.filter((v) => v.validada).length, fijo: 0,
-          total: base * ENCARGADO, siguiente: null,
+          total: comisionar(mias, ENCARGADO), siguiente: null,
           pendientes: mias.filter((v) => !v.validada).length, anuladas: 0,
           equipo: equipo.map((x) => ({ id: x.id, nombre: x.nombre, rol: x.rol })),
           detalle: mias.map(fila),
@@ -119,9 +125,9 @@ export async function GET(req: Request) {
       const fijo = validadas * POR_VALIDADA;
       return {
         id: u.id, nombre: u.nombre, rol: u.rol, concepto: "Comisión + S/ 10 por venta validada + bono por subir",
-        operaciones: subidas, base, tasa, comision: base * tasa, bono,
+        operaciones: subidas, base, tasa, comision: comisionar(generadas, tasa), bono,
         validadas, fijo, porValidada: POR_VALIDADA,
-        total: base * tasa + bono + fijo, siguiente: siguienteMeta("CARGADOR", subidas),
+        total: comisionar(generadas, tasa) + bono + fijo, siguiente: siguienteMeta("CARGADOR", subidas),
         pendientes: generadas.filter((v) => !v.validada).length, anuladas: 0,
         ventasGeneradas: generadas.length,
         detalle: generadas.map(fila),
@@ -163,13 +169,14 @@ export async function GET(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const s = await exigir("ADMIN");
-    const { id, validada, anulada, monto, procesadorId, referencia } = await req.json();
+    const { id, validada, anulada, monto, procesadorId, referencia, cuentaEmpresa } = await req.json();
     const data: any = { revisadoPor: s.usuario, revisadoEn: new Date() };
     if (validada !== undefined) data.validada = !!validada;
     if (anulada !== undefined) data.anulada = !!anulada;
     if (monto !== undefined && Number.isFinite(Number(monto))) data.monto = Number(monto);
     if (procesadorId !== undefined) data.procesadorId = procesadorId || null;
     if (referencia !== undefined) data.referencia = referencia || null;
+    if (cuentaEmpresa !== undefined) data.cuentaEmpresa = !!cuentaEmpresa;
 
     await db.llamada.update({ where: { id: Number(id) }, data });
     invalidarDevengado(); // cambió una venta: recalcular en el próximo pedido

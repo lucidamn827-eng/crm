@@ -12,7 +12,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     const s = await exigir("ADMIN", "CALLER");
     const id = Number((await ctx.params).id);
-    const { resultado, nota, monto, referencia, procesadorId, motivo, seguimiento } = await req.json();
+    const { resultado, nota, monto, referencia, procesadorId, motivo, seguimiento, cuentaEmpresa } = await req.json();
     if (!VALIDOS.includes(resultado)) return Response.json({ error: "Resultado inválido." }, { status: 400 });
 
     // Aceptó con seguimiento (aceptó pero no pagó aún): monto 0, sin procesador.
@@ -46,6 +46,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         monto: resultado === "ACEPTO" ? (conSeguimiento ? 0 : importe) : null,
         referencia: resultado === "ACEPTO" ? (referencia || null) : null,
         procesadorId: resultado === "ACEPTO" ? (procesadorId || null) : null,
+        cuentaEmpresa: resultado === "ACEPTO" ? !!cuentaEmpresa : false,
         desdeIp: ip ?? null, agente: req.headers.get("user-agent")?.slice(0, 160) ?? null,
       },
     });

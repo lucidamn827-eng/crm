@@ -372,9 +372,10 @@ export async function sancionarDesconectados() {
   });
   const ingresaron = new Set(conLlamadaHoy.map((l) => l.callerId));
 
-  // En llamada "fresca" = cuenta como conectado aunque hayan salido de la web a marcar del teléfono.
+  // En llamada = NO se desconecta, dure lo que dure (aunque haya salido de la web a marcar del teléfono).
+  // Solo se restringe a quien NO está en llamada y encima está sin latido hace +20 min.
   const enLlamada = await db.lead.findMany({
-    where: { enLlamadaDesde: { gte: new Date(ahora.getTime() - SANCION.capLlamadaMin * 60000) } },
+    where: { enLlamadaDesde: { not: null } },
     select: { asignadoAId: true },
   });
   const enCall = new Set(enLlamada.map((l) => l.asignadoAId));

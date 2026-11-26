@@ -3,6 +3,7 @@ import { exigir, auditar } from "@/lib/auth";
 import { archivarSiCorresponde } from "@/lib/notificaciones";
 import { dataSubidaHoy, topeSubidaDe } from "@/lib/carga";
 import { estadoColaCaller } from "@/lib/cola";
+import { enviarAviso } from "@/lib/avisos";
 
 const digitos = (t: string) => t.replace(/\D/g, "");
 
@@ -30,7 +31,8 @@ export async function GET() {
           return { ...l, cargadoPor: undefined, cargadoPorId: undefined, asignadoA: undefined };
         }
         return { id: l.id, estado: l.estado, creadoEn: l.creadoEn, reservadoEn: l.reservadoEn,
-                 enLlamadaDesde: null, nombre: "", dni: "", telefono: "", nota: null, viaContacto: null };
+                 enLlamadaDesde: null, nombre: "", dni: "", telefono: "", nota: null, viaContacto: null,
+                 urgente: !!l.urgentePorSpamer };
       };
       const segSeguro = seg.map((l) => ({ ...l, cargadoPor: undefined, cargadoPorId: undefined, asignadoA: undefined }));
       const leads = [...(mia ? [revelar(mia)] : []), ...segSeguro];
@@ -70,6 +72,13 @@ export async function POST(req: Request) {
     const body = await req.json();
     const filas: any[] = Array.isArray(body.contactos) ? body.contactos : [body];
 
+    // URGENTE asignada por el admin a un caller: la data no va al pool, se le reserva a ese caller.
+    const urgenteParaId = s.rol === "ADMIN" && body.urgente && body.callerId ? String(body.callerId) : null;
+    if (urgenteParaId) {
+      const caller = await db.usuario.findFirst({ where: { id: urgenteParaId, rol: "CALLER", activo: true }, select: { id: true, nombre: true, telegramId: true, telefono: true, ventanaHasta: true, notificar: true } });
+      if (!caller) return Response.json({ error: "Elegí un caller válido para la llamada urgente." }, { status: 400 });
+    }
+
     // Tope de subida del spamer (los ADMIN no tienen tope).
     let subidasHoy = s.rol === "CARGADOR" ? await dataSubidaHoy(s.id) : 0;
     const tope = s.rol === "CARGADOR" ? await topeSubidaDe(s.id) : null;
@@ -98,7 +107,11 @@ export async function POST(req: Request) {
         data: {
           nombre, dni, telefono, nota: f.nota || null,
           dispositivo, usuarioDisp: usuarioDisp || null,
-          cargadoPorId: s.id, asignadoAId: null, // ← pool: sin caller
+          cargadoPorId: s.id,
+          // URGENTE: se reserva directo al caller elegido. Si no, va al pool (sin caller).
+          asignadoAId: urgenteParaId,
+          reservadoEn: urgenteParaId ? new Date() : null,
+          urgentePorSpamer: urgenteParaId ? new Date() : null,
           estado: "PENDIENTE",
         },
       });
@@ -106,7 +119,24 @@ export async function POST(req: Request) {
       subidasHoy++;
       if (repetido) avisos.push(`${nombre}: cargado, pero ese DNI ya tenía ${repetido} contacto(s) con otro número`);
     }
-    await auditar(s, "Carga de contactos al pool", `${creados.length} cargados, ${rechazados.length} rechazados`);
+
+    // Si fue urgente: liberar cualquier reserva NO urgente que tuviera ese caller (la urgente pasa a ser la suya),
+    // y avisarle.
+    if (urgenteParaId && creados.length) {
+      await db.lead.updateMany({
+        where: { asignadoAId: urgenteParaId, reservadoEn: { not: null }, enLlamadaDesde: null, urgentePorSpamer: null },
+        data: { asignadoAId: null, reservadoEn: null },
+      });
+      const caller = await db.usuario.findUnique({ where: { id: urgenteParaId }, select: { id: true, nombre: true, telegramId: true, telefono: true, ventanaHasta: true, notificar: true } });
+      if (caller) {
+        await enviarAviso({
+          destinatario: caller, tipo: "urgente_asignada",
+          cuerpo: `🚨 Tenés una llamada URGENTE asignada por tu administrador. Te sale apenas termines la llamada actual.`,
+          parametros: [caller.nombre],
+        }).catch(() => {});
+      }
+    }
+    await auditar(s, urgenteParaId ? "Carga URGENTE asignada" : "Carga de contactos al pool", `${creados.length} cargados, ${rechazados.length} rechazados`);
     const faltan = tope !== null ? Math.max(0, tope - subidasHoy) : null;
     return Response.json({ creados: creados.length, rechazados, avisos, hoy: subidasHoy, tope, faltan });
   } catch (e) {
