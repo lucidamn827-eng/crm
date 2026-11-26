@@ -109,7 +109,24 @@ export async function POST(req: Request) {
       // Cortar si en medio de la tanda se llegó al tope.
       if (tope !== null && subidasHoy >= tope) { rechazados.push(`${nombre}: no se subió, llegaste a tu tope de hoy (${tope})`); continue; }
       // El DNI puede repetirse (misma persona, otro teléfono). Lo único único es el número.
-      if (await db.lead.findUnique({ where: { telefono } })) { rechazados.push(`${nombre}: ese teléfono ya está cargado`); continue; }
+      const existente = await db.lead.findUnique({ where: { telefono } });
+      if (existente) {
+        // Si es URGENTE y el contacto YA existe (ya lo llamaron): lo reactivamos como urgente
+        // para el caller elegido, aunque ya tenga historial. Si no es urgente, se rechaza el duplicado.
+        if (urgenteParaId && !existente.archivadoEn) {
+          const dataReurg: any = {
+            asignadoAId: urgenteParaId, reservadoEn: new Date(), urgentePorSpamer: new Date(),
+            enLlamadaDesde: null, estado: "PENDIENTE", reactivaEn: null,
+          };
+          if (f.nota) dataReurg.nota = f.nota;                 // mensaje nuevo que dejó el spamer
+          if (s.rol === "ADMIN" && body.spamerId) dataReurg.cargadoPorId = cargadoPorId; // re-atribuir si lo elegiste
+          await db.lead.update({ where: { id: existente.id }, data: dataReurg });
+          creados.push(existente.id);
+          avisos.push(`${nombre}: ya existía (ya lo habían llamado), se marcó como URGENTE para el caller`);
+          continue;
+        }
+        rechazados.push(`${nombre}: ese teléfono ya está cargado`); continue;
+      }
 
       const repetido = await db.lead.count({ where: { dni } });
       const lead = await db.lead.create({
