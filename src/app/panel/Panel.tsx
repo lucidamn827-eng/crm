@@ -2229,9 +2229,9 @@ function Liquidacion({ sesion, usuarios }: { sesion: Sesion; usuarios: Usuario[]
                 <td>{v.caller}</td>
                 <td>{v.spamer}</td>
                 <td>{v.procesador}</td>
-                <td className="mono">{soles(v.monto)}</td>
+                <td className="mono">{soles(v.monto)}{v.cuentaEmpresa && <><br /><span className="sub" style={{ color: "var(--volver)" }}>empresa 5%</span></>}</td>
                 <td className="mono" style={{ color: "var(--acepto)", fontWeight: 600 }}>
-                  {v.anulada ? "—" : soles(v.monto * m.tasa)}
+                  {v.anulada ? "—" : soles(v.monto * (v.cuentaEmpresa ? 0.05 : m.tasa))}
                 </td>
                 <td>
                   {v.anulada
